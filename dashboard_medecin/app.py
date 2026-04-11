@@ -163,8 +163,7 @@ def load_data():
         scores = pd.DataFrame(rows)
     return donnees, scores
 
-# Rafraîchissement automatique toutes les 30 secondes
-import time
+
 
 placeholder = st.empty()
 donnees, scores = load_data()
@@ -444,9 +443,3 @@ elif page == "💬 Messagerie":
                     "heure": datetime.now().strftime("%H:%M")
                 })
                 st.rerun()
-                # Compte à rebours et rafraîchissement
-st.sidebar.markdown("---")
-st.sidebar.markdown("<div style='color:#b3e5fc; font-size:0.8rem'>🔄 Actualisation automatique dans 30s</div>", unsafe_allow_html=True)
-time.sleep(30)
-st.cache_data.clear()
-st.rerun()
