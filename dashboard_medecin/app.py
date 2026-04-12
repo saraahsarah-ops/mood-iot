@@ -1,9 +1,11 @@
-import streamlit as st
+import os
+from datetime import datetime
+from pathlib import Path
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import os
-from datetime import datetime
+import streamlit as st
 
 st.set_page_config(
     page_title="Mood-IoT | Dr. Claire Rousseau",
@@ -46,11 +48,9 @@ st.markdown("""
     #MainMenu                         { display: none !important; }
     footer                            { display: none !important; }
 
-    /* ── FOND ── */
     .stApp { background-color: #F0F4F8 !important; }
     .main .block-container { padding: 2rem 2.5rem 3rem 2.5rem; max-width: 1300px; }
 
-    /* ── SIDEBAR BLEU DOCTOLIB ── */
     [data-testid="stSidebar"] { background-color: #0D1B3E !important; }
     [data-testid="stSidebar"] > div:first-child { background-color: #0D1B3E !important; }
     [data-testid="stSidebar"] * { color: #7F91B2 !important; }
@@ -78,7 +78,6 @@ st.markdown("""
         border-left-color: #00BCD4 !important; font-weight: 700 !important;
     }
 
-    /* ── PAGE HEADER ── */
     .page-header {
         background: #ffffff; border-radius: 14px; padding: 20px 24px;
         margin-bottom: 1.5rem; border: 1px solid #E2E8F0;
@@ -87,7 +86,6 @@ st.markdown("""
     .page-title { font-size: 1.25rem; font-weight: 800; color: #0D1B3E; margin: 0 0 3px 0; letter-spacing: -0.02em; }
     .page-subtitle { font-size: 0.82rem; color: #64748B; font-weight: 500; margin: 0; }
 
-    /* ── KPI CARDS ── */
     .kpi-card {
         background: #ffffff; border-radius: 16px; padding: 20px;
         border: 1px solid #E2E8F0; box-shadow: 0 2px 10px rgba(13,27,62,0.07);
@@ -111,7 +109,6 @@ st.markdown("""
     .kpi-stable  .kpi-value  { color: #059669; }
     .kpi-avg     .kpi-value  { color: #1565C0; }
 
-    /* ── CARTES PATIENTES ── */
     .patient-card {
         background: #ffffff; border-radius: 10px; padding: 14px 18px;
         border: 1px solid #E5E7EB; border-left-width: 4px;
@@ -140,7 +137,6 @@ st.markdown("""
     .badge-orange { background: #FEF3C7; color: #92400E; }
     .badge-green  { background: #D1FAE5; color: #065F46; }
 
-    /* ── SECTION TITLE ── */
     .section-title {
         font-size: 0.72rem; font-weight: 800; color: #1565C0;
         text-transform: uppercase; letter-spacing: 0.1em;
@@ -148,7 +144,6 @@ st.markdown("""
         border-bottom: 2px solid #DBEAFE;
     }
 
-    /* ── MÉTRIQUES avec TOOLTIP ── */
     .metric-box {
         background: #ffffff; border-radius: 12px; padding: 18px;
         border: 1px solid #E5E7EB; text-align: center;
@@ -178,7 +173,6 @@ st.markdown("""
     }
     .metric-box:hover .metric-tooltip { display: block; }
 
-    /* ── NOTIFICATIONS ── */
     .notif-card {
         background: #ffffff; border-radius: 12px; padding: 16px 18px 16px 20px;
         border: 1px solid #E8ECF0; margin-bottom: 10px;
@@ -196,7 +190,6 @@ st.markdown("""
     .notif-msg     { font-size: 0.82rem; color: #4A5568; margin-top: 4px; line-height: 1.45; }
     .notif-time    { font-size: 0.7rem; color: #94A3B8; margin-top: 6px; }
 
-    /* ── MESSAGERIE ── */
     .chat-legend { display: flex; gap: 18px; margin-bottom: 10px; font-size: 0.72rem; color: #6B7280; font-weight: 600; }
     .legend-dot  { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 5px; }
     .chat-box {
@@ -242,7 +235,6 @@ st.markdown("""
     .bbl-time { font-size: 0.66rem; color: #9CA3AF; margin: 3px 5px 0 5px; display: block; font-weight: 600; }
     .time-r { text-align: right; }
 
-    /* ── COACHING ── */
     .coaching-box {
         background: #EFF6FF; border-radius: 10px; padding: 14px 17px;
         border: 1px solid #BFDBFE; margin-top: 14px; border-left: 4px solid #1565C0;
@@ -250,7 +242,6 @@ st.markdown("""
     .coaching-tag  { font-size: 0.68rem; font-weight: 800; color: #1565C0; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 5px; }
     .coaching-text { font-size: 0.87rem; color: #1E40AF; line-height: 1.55; font-weight: 500; }
 
-    /* ── BOUTONS BLEU DOCTOLIB ── */
     .stButton > button {
         border-radius: 9px !important; font-size: 0.855rem !important;
         font-weight: 700 !important; border: none !important;
@@ -266,7 +257,6 @@ st.markdown("""
     }
     .stButton > button:active { transform: translateY(0) !important; }
 
-    /* ── INPUTS ── */
     [data-baseweb="select"] { border-radius: 9px !important; }
     .stTextArea textarea, .stTextInput input {
         border-radius: 9px !important; border: 1.5px solid #E2E8F0 !important;
@@ -277,7 +267,6 @@ st.markdown("""
         box-shadow: 0 0 0 3px rgba(21,101,192,0.15) !important;
     }
 
-    /* ── LOGIN ── */
     .login-outer { display: flex; justify-content: center; align-items: flex-start; padding-top: 6vh; }
     .login-box { background: #ffffff; border-radius: 24px; width: 380px; box-shadow: 0 20px 60px rgba(0,0,0,0.2); overflow: hidden; }
     .login-top { background: linear-gradient(160deg, #060F24, #0D1B3E); padding: 36px 36px 28px 36px; text-align: center; }
@@ -354,7 +343,6 @@ LOGO_SVG = """
   <circle cx="22" cy="10" r="1.5" fill="white"/>
 </svg>"""
 
-# ── LOGIN ──
 if not st.session_state.logged_in:
     st.markdown("""
     <style>
@@ -375,7 +363,7 @@ if not st.session_state.logged_in:
           <div class='login-bottom'></div>
         </div></div>
         """, unsafe_allow_html=True)
-        email    = st.text_input("Email professionnel", placeholder="dr.rousseau@mood-iot.fr")
+        email = st.text_input("Email professionnel", placeholder="dr.rousseau@mood-iot.fr")
         password = st.text_input("Mot de passe", type="password", placeholder="••••••••")
         if st.button("Se connecter", use_container_width=True):
             if email.strip() == "dr.rousseau@mood-iot.fr" and password == "medecin123":
@@ -393,12 +381,15 @@ if not st.session_state.logged_in:
         </div>""", unsafe_allow_html=True)
     st.stop()
 
-# ── DONNÉES ──
 @st.cache_data
 def load_data():
-    donnees = pd.read_csv("../simulateur/donnees.csv")
-    if os.path.exists("../backend/scores.csv"):
-        scores = pd.read_csv("../backend/scores.csv")
+    donnees_path = Path(__file__).resolve().parent.parent / "simulateur" / "donnees.csv"
+    scores_path = Path(__file__).resolve().parent.parent / "backend" / "scores.csv"
+
+    donnees = pd.read_csv(donnees_path)
+
+    if scores_path.exists():
+        scores = pd.read_csv(scores_path)
     else:
         import numpy as np
         rows = []
@@ -411,18 +402,25 @@ def load_data():
                     else "Votre sommeil semble perturbé. Essayez une courte marche." if niveau == 2
                     else "Votre médecin a été informé et va vous contacter rapidement."
                 )
-                rows.append({"patiente": p, "jour": jour, "score": score, "niveau": niveau, "message_coaching": msg})
+                rows.append(
+                    {
+                        "patiente": p,
+                        "jour": jour,
+                        "score": score,
+                        "niveau": niveau,
+                        "message_coaching": msg,
+                    }
+                )
         scores = pd.DataFrame(rows)
+
     return donnees, scores
 
 donnees, scores = load_data()
 
-# ── SESSION ──
 if "notifications" not in st.session_state:
     st.session_state.notifications = []
 
 if "messages" not in st.session_state:
-    # Messages IA exemples enrichis par patiente
     messages_ia_exemples = {
         "Sophie": [
             {"role": "ia", "texte": "Bonjour Sophie ! Votre rythme de sommeil s'est amélioré cette semaine. Continuez à maintenir des horaires réguliers.", "heure": "Jour 3", "jour": 3},
@@ -445,9 +443,9 @@ if "messages" not in st.session_state:
     }
     messages_initiaux = {
         "Sophie": [{"role": "patiente", "texte": "Bonjour docteur, je ne dors plus bien.", "heure": "J1", "jour": 1}],
-        "Marie":  [{"role": "patiente", "texte": "Je me sens très fatiguée ces derniers jours.", "heure": "J1", "jour": 1}],
-        "Léa":    [{"role": "patiente", "texte": "J'ai du mal à sortir de chez moi.", "heure": "J1", "jour": 1}],
-        "Anna":   [{"role": "patiente", "texte": "Bonjour, comment ça se passe pour mon suivi ?", "heure": "J1", "jour": 1}],
+        "Marie": [{"role": "patiente", "texte": "Je me sens très fatiguée ces derniers jours.", "heure": "J1", "jour": 1}],
+        "Léa": [{"role": "patiente", "texte": "J'ai du mal à sortir de chez moi.", "heure": "J1", "jour": 1}],
+        "Anna": [{"role": "patiente", "texte": "Bonjour, comment ça se passe pour mon suivi ?", "heure": "J1", "jour": 1}],
     }
     st.session_state.messages = {}
     for p_nom in donnees["patiente"].unique():
@@ -465,12 +463,11 @@ if "messages" not in st.session_state:
 if "commentaires" not in st.session_state:
     st.session_state.commentaires = {p: "" for p in donnees["patiente"].unique()}
 
-# ── HELPERS ──
 def niveau_meta(niveau):
     return {
-        1: {"color": "#059669", "cls": "green",  "av": "av-green",  "badge": "badge-green",  "pc": "pc-green",  "label": "Stable"},
+        1: {"color": "#059669", "cls": "green", "av": "av-green", "badge": "badge-green", "pc": "pc-green", "label": "Stable"},
         2: {"color": "#D97706", "cls": "orange", "av": "av-orange", "badge": "badge-orange", "pc": "pc-orange", "label": "À surveiller"},
-        3: {"color": "#DC2626", "cls": "red",    "av": "av-red",    "badge": "badge-red",    "pc": "pc-red",    "label": "Critique"},
+        3: {"color": "#DC2626", "cls": "red", "av": "av-red", "badge": "badge-red", "pc": "pc-red", "label": "Critique"},
     }[niveau]
 
 def initiales(nom):
@@ -480,7 +477,6 @@ def initiales(nom):
 derniers_scores = scores.sort_values("jour").groupby("patiente").last().reset_index()
 derniers_scores = derniers_scores.sort_values("niveau", ascending=False)
 
-# ── SIDEBAR ──
 with st.sidebar:
     st.markdown(f"""
     <div style='padding:24px 16px 16px 16px;'>
@@ -528,7 +524,6 @@ with st.sidebar:
         st.session_state.logged_in = False
         st.rerun()
 
-# ══ PAGE 1 — VUE GÉNÉRALE ══
 if page == "Vue générale":
     st.markdown(f"""
     <div class='page-header' style='display:flex;align-items:center;justify-content:space-between;'>
@@ -547,9 +542,9 @@ if page == "Vue générale":
     </div>
     """, unsafe_allow_html=True)
 
-    nb_rouge  = len(derniers_scores[derniers_scores["niveau"] == 3])
-    nb_jaune  = len(derniers_scores[derniers_scores["niveau"] == 2])
-    nb_vert   = len(derniers_scores[derniers_scores["niveau"] == 1])
+    nb_rouge = len(derniers_scores[derniers_scores["niveau"] == 3])
+    nb_jaune = len(derniers_scores[derniers_scores["niveau"] == 2])
+    nb_vert = len(derniers_scores[derniers_scores["niveau"] == 1])
     score_moy = int(derniers_scores["score"].mean())
 
     c1, c2, c3, c4 = st.columns(4)
@@ -590,7 +585,7 @@ if page == "Vue générale":
 
     for _, row in derniers_scores.iterrows():
         meta = niveau_meta(row["niveau"])
-        ini  = initiales(row["patiente"])
+        ini = initiales(row["patiente"])
         if row["niveau"] == 3:
             col_card, col_btn = st.columns([8, 2])
         else:
@@ -612,8 +607,10 @@ if page == "Vue générale":
                 st.markdown("<div style='margin-top:10px;'>", unsafe_allow_html=True)
                 if st.button("Envoyer alerte", key=f"alert_{row['patiente']}"):
                     st.session_state.notifications.append({
-                        "patiente": row["patiente"], "score": row["score"],
-                        "heure": datetime.now().strftime("%H:%M"), "lue": False,
+                        "patiente": row["patiente"],
+                        "score": row["score"],
+                        "heure": datetime.now().strftime("%H:%M"),
+                        "lue": False,
                         "message": f"Score critique de {row['score']}/100 détecté pour {row['patiente']}"
                     })
                     st.success(f"✓ Alerte envoyée pour {row['patiente']}.")
@@ -621,7 +618,6 @@ if page == "Vue générale":
 
     st.markdown("<div class='section-title'>Évolution des scores — 21 jours</div>", unsafe_allow_html=True)
 
-    # Palette Doctolib pour les 4 courbes
     palette = ["#1565C0", "#00BCD4", "#F59E0B", "#EF4444"]
     patientes_list = sorted(scores["patiente"].unique().tolist())
     color_map = {p: palette[i % len(palette)] for i, p in enumerate(patientes_list)}
@@ -631,8 +627,10 @@ if page == "Vue générale":
         df_p = scores[scores["patiente"] == patiente_nom].sort_values("jour")
         couleur = color_map[patiente_nom]
         fig.add_trace(go.Scatter(
-            x=df_p["jour"], y=df_p["score"],
-            mode="lines", name=patiente_nom,
+            x=df_p["jour"],
+            y=df_p["score"],
+            mode="lines",
+            name=patiente_nom,
             line=dict(color=couleur, width=2.5, shape="spline"),
             customdata=df_p[["patiente", "niveau", "message_coaching"]].values,
             hovertemplate=(
@@ -656,7 +654,6 @@ if page == "Vue générale":
     )
     st.plotly_chart(fig, use_container_width=True)
 
-# ══ PAGE 2 — FICHE PATIENTE ══
 elif page == "Fiche patiente":
     st.markdown("""
     <div class='page-header'>
@@ -664,10 +661,10 @@ elif page == "Fiche patiente":
         <div class='page-subtitle'>Données biométriques et évolution clinique — Mood-IoT</div>
     </div>""", unsafe_allow_html=True)
 
-    patiente  = st.selectbox("Sélectionner une patiente", donnees["patiente"].unique())
+    patiente = st.selectbox("Sélectionner une patiente", donnees["patiente"].unique())
     score_row = scores[scores["patiente"] == patiente].sort_values("jour").iloc[-1]
-    meta      = niveau_meta(int(score_row["niveau"]))
-    ini       = initiales(patiente)
+    meta = niveau_meta(int(score_row["niveau"]))
+    ini = initiales(patiente)
 
     st.markdown(f"""
     <div style='display:flex;align-items:center;gap:14px;margin:1rem 0 1.5rem 0;
@@ -683,38 +680,38 @@ elif page == "Fiche patiente":
         </div>
     </div>""", unsafe_allow_html=True)
 
-    data_p   = donnees[donnees["patiente"] == patiente]
+    data_p = donnees[donnees["patiente"] == patiente]
     baseline = data_p[data_p["jour"] <= 7]
 
     metrics = [
-        ("Pas / jour",      "pas",               int(round(baseline["pas"].mean())),              int(data_p.iloc[-1]["pas"])),
-        ("Sommeil (h)",     "sommeil_heures",     round(baseline["sommeil_heures"].mean(), 2),      round(float(data_p.iloc[-1]["sommeil_heures"]), 2)),
-        ("Fréq. cardiaque", "battements_coeur",   int(round(baseline["battements_coeur"].mean())),  int(data_p.iloc[-1]["battements_coeur"])),
-        ("Temps écran (h)", "temps_ecran_heures", round(baseline["temps_ecran_heures"].mean(), 2),  round(float(data_p.iloc[-1]["temps_ecran_heures"]), 2)),
+        ("Pas / jour", "pas", int(round(baseline["pas"].mean())), int(data_p.iloc[-1]["pas"])),
+        ("Sommeil (h)", "sommeil_heures", round(baseline["sommeil_heures"].mean(), 2), round(float(data_p.iloc[-1]["sommeil_heures"]), 2)),
+        ("Fréq. cardiaque", "battements_coeur", int(round(baseline["battements_coeur"].mean())), int(data_p.iloc[-1]["battements_coeur"])),
+        ("Temps écran (h)", "temps_ecran_heures", round(baseline["temps_ecran_heures"].mean(), 2), round(float(data_p.iloc[-1]["temps_ecran_heures"]), 2)),
     ]
 
     tooltips_interpretation = {
         "Pas / jour": {
             "positif": "✅ Activité physique stable ou en hausse. La marche régulière réduit les symptômes dépressifs.",
-            "neutre":  "⚠️ Légère baisse d'activité. Encourager une marche quotidienne de 20 min minimum.",
+            "neutre": "⚠️ Légère baisse d'activité. Encourager une marche quotidienne de 20 min minimum.",
             "negatif": "🔴 Activité physique fortement réduite. Signe possible de repli ou de dépression. À surveiller.",
             "seuil_pos": 0, "seuil_neg": -1000
         },
         "Sommeil (h)": {
             "positif": "✅ Durée de sommeil stable. Un sommeil régulier de 7-9h favorise la stabilité de l'humeur.",
-            "neutre":  "⚠️ Légère réduction du sommeil. Vérifier les facteurs environnementaux ou anxiogènes.",
+            "neutre": "⚠️ Légère réduction du sommeil. Vérifier les facteurs environnementaux ou anxiogènes.",
             "negatif": "🔴 Sommeil significativement perturbé. Risque accru de rechute dépressive. Intervention recommandée.",
             "seuil_pos": 0, "seuil_neg": -1.5
         },
         "Fréq. cardiaque": {
             "positif": "✅ FC au repos normale (60-100 bpm). Pas de signe de stress physiologique apparent.",
-            "neutre":  "⚠️ Légère augmentation de la FC. Peut indiquer un stress ou une anxiété sous-jacente.",
+            "neutre": "⚠️ Légère augmentation de la FC. Peut indiquer un stress ou une anxiété sous-jacente.",
             "negatif": "🔴 FC élevée. Possible état d'anxiété chronique ou effet secondaire médicamenteux à évaluer.",
             "seuil_pos": 5, "seuil_neg": -5
         },
         "Temps écran (h)": {
             "positif": "✅ Temps d'écran maîtrisé. Bonne hygiène numérique favorable à la qualité du sommeil.",
-            "neutre":  "⚠️ Légère augmentation. Surveiller l'impact sur le sommeil et l'isolement social.",
+            "neutre": "⚠️ Légère augmentation. Surveiller l'impact sur le sommeil et l'isolement social.",
             "negatif": "🔴 Temps d'écran très élevé. Associé à l'isolement et à la dégradation du sommeil.",
             "seuil_pos": 0.5, "seuil_neg": 2
         },
@@ -723,22 +720,28 @@ elif page == "Fiche patiente":
     def get_tooltip(label, delta):
         t = tooltips_interpretation.get(label, {})
         if label in ["Pas / jour", "Sommeil (h)"]:
-            if delta >= t["seuil_pos"]: return t["positif"]
-            elif delta >= t["seuil_neg"]: return t["neutre"]
-            else: return t["negatif"]
-        else:  # FC et écran : hausse = mauvais
-            if delta <= t["seuil_pos"]: return t["positif"]
-            elif delta <= t["seuil_neg"]: return t["neutre"]
-            else: return t["negatif"]
+            if delta >= t["seuil_pos"]:
+                return t["positif"]
+            elif delta >= t["seuil_neg"]:
+                return t["neutre"]
+            else:
+                return t["negatif"]
+        else:
+            if delta <= t["seuil_pos"]:
+                return t["positif"]
+            elif delta <= t["seuil_neg"]:
+                return t["neutre"]
+            else:
+                return t["negatif"]
 
     m1, m2, m3, m4 = st.columns(4)
     for col, (label, _, base_val, curr_val) in zip([m1, m2, m3, m4], metrics):
-        delta     = round(curr_val - base_val, 2)
-        is_float  = isinstance(curr_val, float)
-        val_str   = f"{curr_val:.2f}" if is_float else str(curr_val)
+        delta = round(curr_val - base_val, 2)
+        is_float = isinstance(curr_val, float)
+        val_str = f"{curr_val:.2f}" if is_float else str(curr_val)
         delta_str = (f"+{delta:.2f}" if is_float else f"+{int(delta)}") if delta > 0 else (f"{delta:.2f}" if is_float else str(int(delta)))
-        dcls      = "delta-neg" if delta < 0 else "delta-warn"
-        tooltip   = get_tooltip(label, delta)
+        dcls = "delta-neg" if delta < 0 else "delta-warn"
+        tooltip = get_tooltip(label, delta)
         with col:
             st.markdown(f"""
             <div class='metric-box'>
@@ -821,7 +824,6 @@ elif page == "Fiche patiente":
         <div class='coaching-text'>{score_row['message_coaching']}</div>
     </div>""", unsafe_allow_html=True)
 
-# ══ PAGE 3 — NOTIFICATIONS ══
 elif "Notifications" in page:
     st.markdown("""
     <div class='page-header'>
@@ -849,7 +851,8 @@ elif "Notifications" in page:
             st.markdown(f"<div style='font-size:0.85rem;color:#64748B;padding:6px 0;font-weight:600;'>{nb_non_lues} non lue{'s' if nb_non_lues > 1 else ''} sur {len(st.session_state.notifications)}</div>", unsafe_allow_html=True)
         with col_btn:
             if st.button("Tout lire"):
-                for n in st.session_state.notifications: n["lue"] = True
+                for n in st.session_state.notifications:
+                    n["lue"] = True
                 st.rerun()
         for i, notif in enumerate(st.session_state.notifications):
             lue = notif.get("lue", False)
@@ -874,7 +877,6 @@ elif "Notifications" in page:
                         st.rerun()
                     st.markdown("</div>", unsafe_allow_html=True)
 
-# ══ PAGE 4 — MESSAGERIE ══
 elif page == "Messagerie":
     st.markdown("""
     <div class='page-header'>
@@ -882,10 +884,10 @@ elif page == "Messagerie":
         <div class='page-subtitle'>Communication sécurisée médecin – patiente — Mood-IoT</div>
     </div>""", unsafe_allow_html=True)
 
-    patiente  = st.selectbox("Conversation avec", donnees["patiente"].unique())
+    patiente = st.selectbox("Conversation avec", donnees["patiente"].unique())
     score_row = derniers_scores[derniers_scores["patiente"] == patiente].iloc[0]
-    meta      = niveau_meta(int(score_row["niveau"]))
-    ini       = initiales(patiente)
+    meta = niveau_meta(int(score_row["niveau"]))
+    ini = initiales(patiente)
 
     st.markdown(f"""
     <div style='display:flex;align-items:center;gap:12px;margin-bottom:14px;
@@ -959,9 +961,9 @@ elif page == "Messagerie":
 
     c1, c2, c3 = st.columns(3)
     for col, (label, texte) in zip([c1, c2, c3], [
-        ("Appel prévu",       "Je vous appelle dans la journée pour faire le point."),
+        ("Appel prévu", "Je vous appelle dans la journée pour faire le point."),
         ("Rappel traitement", "Pensez à prendre votre traitement ce soir."),
-        ("Encouragement",     "Vous faites du bon travail, continuez ainsi."),
+        ("Encouragement", "Vous faites du bon travail, continuez ainsi."),
     ]):
         with col:
             if st.button(label, key=f"rapide_{label}"):
