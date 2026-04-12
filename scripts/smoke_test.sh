@@ -142,69 +142,64 @@ else
     check_status "No token -> 401/403" "403" "$AUTH_URL/auth/me"
 fi
 
-# --- 3. Patient Service ---
+# --- 3. Patient Service (PostgreSQL) ---
 bold ""
-bold "--- 3. PATIENT SERVICE ---"
+bold "--- 3. PATIENT SERVICE (PostgreSQL) ---"
 
 DR_TOKEN=$(curl -s -X POST "$AUTH_URL/auth/login" \
     -H "Content-Type: application/json" \
     -d '{"email":"dr.martin@mood-iot.fr","password":"MoodIoT2026!"}' | python -c "import sys,json; print(json.load(sys.stdin)['access_token'])" 2>/dev/null)
 
-# Create patient
-CREATE_PAT=$(curl -s -X POST "$PATIENT_URL/patients" \
+# List patients from seed data (PostgreSQL)
+LIST_PAT=$(curl -s "$PATIENT_URL/patients" -H "Authorization: Bearer $DR_TOKEN" 2>/dev/null)
+check "List patients from PostgreSQL" '"total":4' "$LIST_PAT"
+check "Seed patient Sophie Dupont" '"first_name":"Sophie"' "$LIST_PAT"
+
+# Get seed patient by ID
+SOPHIE_ID="c0000000-0000-0000-0000-000000000001"
+GET_PAT=$(curl -s "$PATIENT_URL/patients/$SOPHIE_ID" -H "Authorization: Bearer $DR_TOKEN" 2>/dev/null)
+check "Get seed patient by ID" '"last_name":"Dupont"' "$GET_PAT"
+
+# Submit PHQ-9 mood entry (persisted in PostgreSQL)
+MOOD=$(curl -s -X POST "$PATIENT_URL/patients/$SOPHIE_ID/mood" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $DR_TOKEN" \
-    -d '{"first_name":"TestPat","last_name":"Smoke","date_of_birth":"1995-01-01","gender":"female"}' 2>/dev/null)
-check "Create patient" '"first_name":"TestPat"' "$CREATE_PAT"
+    -d '{"phq9_scores":[1,2,1,0,2,1,0,1,0],"notes":"Test mood","sleep_hours":7,"activity_minutes":45}' 2>/dev/null)
+check "Submit PHQ-9 mood entry" '"severity":"mild"' "$MOOD"
+check "PHQ-9 total = 8" '"phq9_total":8' "$MOOD"
 
-PAT_ID=$(echo "$CREATE_PAT" | python -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
+# Health data sync (PostgreSQL UPSERT)
+SYNC=$(curl -s -X POST "$PATIENT_URL/patients/$SOPHIE_ID/health-data" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $DR_TOKEN" \
+    -d '{"date":"2026-04-12","heart_rate_avg":72,"sleep_duration_min":450,"step_count":8500,"source_platform":"android_health_connect"}' 2>/dev/null)
+check "Health data sync (PostgreSQL)" '"source_platform":"android_health_connect"' "$SYNC"
 
-if [ -n "$PAT_ID" ]; then
-    # Get patient
-    GET_PAT=$(curl -s "$PATIENT_URL/patients/$PAT_ID" -H "Authorization: Bearer $DR_TOKEN" 2>/dev/null)
-    check "Get patient by ID" '"last_name":"Smoke"' "$GET_PAT"
+# Batch health data
+BATCH=$(curl -s -X POST "$PATIENT_URL/patients/$SOPHIE_ID/health-data/batch" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $DR_TOKEN" \
+    -d '[{"date":"2026-04-10","heart_rate_avg":70,"step_count":6000,"source_platform":"android_health_connect"},{"date":"2026-04-11","heart_rate_avg":75,"step_count":9000,"source_platform":"android_health_connect"}]' 2>/dev/null)
+check "Batch health data sync" '"synced_count":2' "$BATCH"
 
-    # Submit PHQ-9
-    MOOD=$(curl -s -X POST "$PATIENT_URL/patients/$PAT_ID/mood" \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer $DR_TOKEN" \
-        -d '{"phq9_scores":[1,2,1,0,2,1,0,1,0],"notes":"Test mood","sleep_hours":7,"activity_minutes":45}' 2>/dev/null)
-    check "Submit PHQ-9 mood entry" '"severity":"mild"' "$MOOD"
-    check "PHQ-9 total = 8" '"phq9_total":8' "$MOOD"
+# Invalid platform
+check_status "Invalid platform -> 422" "422" "$PATIENT_URL/patients/$SOPHIE_ID/health-data" \
+    -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $DR_TOKEN" \
+    -d '{"date":"2026-04-12","source_platform":"invalid_platform"}'
 
-    # Health data sync
-    SYNC=$(curl -s -X POST "$PATIENT_URL/patients/$PAT_ID/health-data" \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer $DR_TOKEN" \
-        -d '{"date":"2026-04-12","heart_rate_avg":72,"sleep_duration_min":450,"step_count":8500,"source_platform":"android_health_connect"}' 2>/dev/null)
-    check "Health data sync" '"source_platform":"android_health_connect"' "$SYNC"
+# Consents from seed data
+CONSENT=$(curl -s "$PATIENT_URL/patients/$SOPHIE_ID/consents" -H "Authorization: Bearer $DR_TOKEN" 2>/dev/null)
+check "Get consents from PostgreSQL" '"data_collection":true' "$CONSENT"
 
-    # Batch health data
-    BATCH=$(curl -s -X POST "$PATIENT_URL/patients/$PAT_ID/health-data/batch" \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer $DR_TOKEN" \
-        -d '[{"date":"2026-04-10","heart_rate_avg":70,"step_count":6000,"source_platform":"android_health_connect"},{"date":"2026-04-11","heart_rate_avg":75,"step_count":9000,"source_platform":"android_health_connect"}]' 2>/dev/null)
-    check "Batch health data sync" '"synced_count":2' "$BATCH"
-
-    # Invalid platform
-    check_status "Invalid platform -> 422" "422" "$PATIENT_URL/patients/$PAT_ID/health-data" \
-        -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $DR_TOKEN" \
-        -d '{"date":"2026-04-12","source_platform":"invalid_platform"}'
-
-    # Consents
-    CONSENT=$(curl -s "$PATIENT_URL/patients/$PAT_ID/consents" -H "Authorization: Bearer $DR_TOKEN" 2>/dev/null)
-    check "Get consents (default)" '"patient_id"' "$CONSENT"
-fi
-
-# --- 4. Teleconsult Service ---
+# --- 4. Teleconsult Service (PostgreSQL) ---
 bold ""
-bold "--- 4. TELECONSULT SERVICE ---"
+bold "--- 4. TELECONSULT SERVICE (PostgreSQL) ---"
 
 # Create session
 SESS=$(curl -s -X POST "$TELECONSULT_URL/teleconsult/sessions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $DR_TOKEN" \
-    -d '{"patient_id":"b0000000-0000-0000-0000-000000000001","psychiatre_id":"a0000000-0000-0000-0000-000000000001","scheduled_at":"2026-04-15T10:00:00Z","duration_minutes":30}' 2>/dev/null)
+    -d '{"patient_id":"c0000000-0000-0000-0000-000000000001","psychiatre_id":"a0000000-0000-0000-0000-000000000001","scheduled_at":"2026-04-15T10:00:00Z","duration_minutes":30}' 2>/dev/null)
 check "Create teleconsult session" '"status":"scheduled"' "$SESS"
 check "Jitsi room generated" '"jitsi_room_name":"mood-iot-' "$SESS"
 

@@ -1,9 +1,10 @@
 """
 Mood-IoT : Service Patient (port 8002).
 Gestion des dossiers patients, mood entries (PHQ-9), baseline, consentements.
+Connecte a PostgreSQL via SQLAlchemy async.
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Optional
 from uuid import uuid4
@@ -11,10 +12,23 @@ from uuid import uuid4
 from fastapi import FastAPI, Depends, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from sqlalchemy import select, and_, func, Date, cast
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.shared.config import settings
 from src.shared.auth import get_current_user, require_role
 from src.shared.database import get_db
+from src.shared.models import (
+    Patient,
+    PatientPsychiatrist,
+    MoodEntry,
+    Consent,
+    ConsentType,
+    Baseline,
+    DailyAggregate,
+    User,
+)
 
 # ---------------------------------------------------------------------------
 # Application
@@ -22,8 +36,8 @@ from src.shared.database import get_db
 
 app = FastAPI(
     title="Mood-IoT Patient Service",
-    version="1.0.0",
-    description="Service de gestion des patients et suivi de l'humeur",
+    version="2.0.0",
+    description="Service de gestion des patients et suivi de l'humeur — PostgreSQL",
 )
 
 app.add_middleware(
@@ -43,6 +57,10 @@ class Gender(str, Enum):
     male = "male"
     female = "female"
     other = "other"
+
+
+GENDER_MAP = {"male": "M", "female": "F", "other": "autre"}
+GENDER_REVERSE = {"M": "male", "F": "female", "autre": "other"}
 
 
 class PatientCreate(BaseModel):
@@ -171,15 +189,6 @@ class HealthDataBatchResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# In-memory store (placeholder)
-# ---------------------------------------------------------------------------
-
-_patients_db: dict[str, dict] = {}
-_mood_entries_db: dict[str, list[dict]] = {}
-_consents_db: dict[str, dict] = {}
-_baseline_db: dict[str, dict] = {}
-
-# ---------------------------------------------------------------------------
 # Health check (avant les routes protegees)
 # ---------------------------------------------------------------------------
 
@@ -210,6 +219,47 @@ def _phq9_severity(total: int) -> str:
     return "unknown"
 
 
+def _patient_to_response(
+    patient: Patient,
+    psychiatre_id: Optional[str] = None,
+    email: Optional[str] = None,
+) -> PatientResponse:
+    """Convert a Patient ORM object to a PatientResponse."""
+    gender_str = GENDER_REVERSE.get(
+        patient.gender.value if hasattr(patient.gender, "value") else str(patient.gender),
+        "other",
+    )
+    return PatientResponse(
+        id=str(patient.id),
+        first_name=patient.first_name,
+        last_name=patient.last_name,
+        date_of_birth=str(patient.date_of_birth) if patient.date_of_birth else "",
+        gender=gender_str,
+        email=email,
+        phone=patient.emergency_contact_phone,
+        psychiatre_id=psychiatre_id,
+        created_at=patient.created_at.isoformat() if patient.created_at else "",
+        updated_at=patient.updated_at.isoformat() if patient.updated_at else "",
+    )
+
+
+async def _get_primary_psychiatrist(patient_id: str, db: AsyncSession) -> Optional[str]:
+    """Get the primary psychiatrist for a patient."""
+    result = await db.execute(
+        select(PatientPsychiatrist.psychiatrist_id)
+        .where(PatientPsychiatrist.patient_id == patient_id)
+        .limit(1)
+    )
+    row = result.scalar_one_or_none()
+    return str(row) if row else None
+
+
+async def _get_patient_email(user_id, db: AsyncSession) -> Optional[str]:
+    """Get the email for a patient's user account."""
+    result = await db.execute(select(User.email).where(User.id == user_id))
+    return result.scalar_one_or_none()
+
+
 # ---------------------------------------------------------------------------
 # Endpoints - Patients
 # ---------------------------------------------------------------------------
@@ -219,24 +269,39 @@ def _phq9_severity(total: int) -> str:
 async def list_patients(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_role("psychiatre", "admin")),
 ):
     """Lister les patients (psychiatre / admin uniquement)."""
-    all_patients = list(_patients_db.values())
+    query = select(Patient)
 
-    # Filter: psychiatre sees only their patients
+    # psychiatre sees only their assigned patients
     if current_user["role"] == "psychiatre":
-        all_patients = [
-            p for p in all_patients if p.get("psychiatre_id") == current_user["user_id"]
-        ]
+        subq = select(PatientPsychiatrist.patient_id).where(
+            PatientPsychiatrist.psychiatrist_id == current_user["user_id"]
+        )
+        query = query.where(Patient.id.in_(subq))
 
-    total = len(all_patients)
-    start = (page - 1) * page_size
-    end = start + page_size
-    page_data = all_patients[start:end]
+    # Count total
+    count_q = select(func.count(Patient.id))
+    if current_user["role"] == "psychiatre":
+        count_q = count_q.where(Patient.id.in_(subq))
+    total = (await db.execute(count_q)).scalar() or 0
+
+    # Paginate
+    query = query.order_by(Patient.last_name).offset((page - 1) * page_size).limit(page_size)
+    result = await db.execute(query)
+    patients = result.scalars().all()
+
+    # Build responses
+    patient_responses = []
+    for p in patients:
+        psych_id = await _get_primary_psychiatrist(str(p.id), db)
+        email = await _get_patient_email(p.user_id, db)
+        patient_responses.append(_patient_to_response(p, psych_id, email))
 
     return PatientListResponse(
-        patients=[PatientResponse(**p) for p in page_data],
+        patients=patient_responses,
         total=total,
         page=page,
         page_size=page_size,
@@ -250,75 +315,105 @@ async def list_patients(
 )
 async def create_patient(
     payload: PatientCreate,
+    db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_role("psychiatre", "admin")),
 ):
     """Creer un nouveau dossier patient."""
-    patient_id = str(uuid4())
-    now = datetime.now(timezone.utc).isoformat()
+    db_gender = GENDER_MAP.get(payload.gender.value, "autre")
 
-    patient = {
-        "id": patient_id,
-        "first_name": payload.first_name,
-        "last_name": payload.last_name,
-        "date_of_birth": payload.date_of_birth,
-        "gender": payload.gender.value,
-        "email": payload.email,
-        "phone": payload.phone,
-        "psychiatre_id": payload.psychiatre_id or current_user["user_id"],
-        "created_at": now,
-        "updated_at": now,
-    }
-    _patients_db[patient_id] = patient
+    patient = Patient(
+        first_name=payload.first_name,
+        last_name=payload.last_name,
+        date_of_birth=date.fromisoformat(payload.date_of_birth) if payload.date_of_birth else None,
+        gender=db_gender,
+        emergency_contact_phone=payload.phone,
+    )
+    db.add(patient)
+    await db.flush()
 
-    # Initialize empty consent
-    _consents_db[patient_id] = {
-        "patient_id": patient_id,
-        "consents": ConsentItem().model_dump(),
-        "updated_at": now,
-    }
+    # Assign psychiatrist
+    psych_id = payload.psychiatre_id or current_user["user_id"]
+    assignment = PatientPsychiatrist(
+        patient_id=patient.id,
+        psychiatrist_id=psych_id,
+        is_primary=True,
+    )
+    db.add(assignment)
 
-    # TODO: persist to PostgreSQL via get_db()
-    return PatientResponse(**patient)
+    # Initialize default consents (all False)
+    for ct in ConsentType:
+        consent = Consent(
+            patient_id=patient.id,
+            consent_type=ct,
+            is_granted=False,
+        )
+        db.add(consent)
+
+    await db.flush()
+
+    return _patient_to_response(patient, psych_id, payload.email)
 
 
 @app.get("/patients/{patient_id}", response_model=PatientResponse)
 async def get_patient(
     patient_id: str,
+    db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """Recuperer le detail d'un patient."""
-    patient = _patients_db.get(patient_id)
+    result = await db.execute(select(Patient).where(Patient.id == patient_id))
+    patient = result.scalar_one_or_none()
     if patient is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient introuvable")
 
-    # Authorization: patient can only see themselves, psychiatre only their patients
-    if current_user["role"] == "patient" and current_user["user_id"] != patient_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acces refuse")
-    if (
-        current_user["role"] == "psychiatre"
-        and patient.get("psychiatre_id") != current_user["user_id"]
-    ):
+    # Authorization: patient can only see their own profile
+    if current_user["role"] == "patient" and str(patient.user_id) != current_user["user_id"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acces refuse")
 
-    return PatientResponse(**patient)
+    # Authorization: psychiatre can only see their assigned patients
+    if current_user["role"] == "psychiatre":
+        check = await db.execute(
+            select(PatientPsychiatrist).where(
+                and_(
+                    PatientPsychiatrist.patient_id == patient_id,
+                    PatientPsychiatrist.psychiatrist_id == current_user["user_id"],
+                )
+            )
+        )
+        if check.scalar_one_or_none() is None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acces refuse")
+
+    psych_id = await _get_primary_psychiatrist(patient_id, db)
+    email = await _get_patient_email(patient.user_id, db)
+    return _patient_to_response(patient, psych_id, email)
 
 
 @app.put("/patients/{patient_id}", response_model=PatientResponse)
 async def update_patient(
     patient_id: str,
     payload: PatientUpdate,
+    db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_role("psychiatre", "admin")),
 ):
     """Mettre a jour un dossier patient."""
-    patient = _patients_db.get(patient_id)
+    result = await db.execute(select(Patient).where(Patient.id == patient_id))
+    patient = result.scalar_one_or_none()
     if patient is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient introuvable")
 
-    update_data = payload.model_dump(exclude_unset=True)
-    patient.update(update_data)
-    patient["updated_at"] = datetime.now(timezone.utc).isoformat()
+    if payload.first_name is not None:
+        patient.first_name = payload.first_name
+    if payload.last_name is not None:
+        patient.last_name = payload.last_name
+    if payload.phone is not None:
+        patient.emergency_contact_phone = payload.phone
 
-    return PatientResponse(**patient)
+    patient.updated_at = datetime.now(timezone.utc)
+    await db.flush()
+
+    psych_id = await _get_primary_psychiatrist(patient_id, db)
+    email = await _get_patient_email(patient.user_id, db)
+    return _patient_to_response(patient, psych_id, email)
 
 
 # ---------------------------------------------------------------------------
@@ -329,17 +424,36 @@ async def update_patient(
 @app.get("/patients/{patient_id}/baseline", response_model=BaselineData)
 async def get_baseline(
     patient_id: str,
+    db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """Recuperer les donnees de reference (baseline) d'un patient."""
-    if patient_id not in _patients_db:
+    # Verify patient exists
+    pat_result = await db.execute(select(Patient.id).where(Patient.id == patient_id))
+    if pat_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient introuvable")
 
-    baseline = _baseline_db.get(patient_id)
-    if baseline is None:
-        return BaselineData(patient_id=patient_id)
+    # Get baselines
+    result = await db.execute(
+        select(Baseline).where(Baseline.patient_id == patient_id)
+    )
+    baselines = result.scalars().all()
 
-    return BaselineData(**baseline)
+    # Map baselines to response fields
+    data = {"patient_id": patient_id}
+    for b in baselines:
+        if b.metric_name == "phq9":
+            data["phq9_initial"] = int(b.mean_value) if b.mean_value else None
+        elif b.metric_name == "sleep_quality":
+            data["sleep_quality"] = b.mean_value
+        elif b.metric_name == "activity":
+            data["activity_level"] = b.mean_value
+        elif b.metric_name == "social":
+            data["social_interaction"] = b.mean_value
+        if b.calculated_at:
+            data["collected_at"] = b.calculated_at.isoformat()
+
+    return BaselineData(**data)
 
 
 # ---------------------------------------------------------------------------
@@ -355,10 +469,13 @@ async def get_baseline(
 async def submit_mood_entry(
     patient_id: str,
     payload: MoodEntryCreate,
+    db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """Soumettre une entree d'humeur PHQ-9."""
-    if patient_id not in _patients_db:
+    # Verify patient exists
+    pat_result = await db.execute(select(Patient.id).where(Patient.id == patient_id))
+    if pat_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient introuvable")
 
     # Validate scores range
@@ -370,54 +487,74 @@ async def submit_mood_entry(
             )
 
     total = sum(payload.phq9_scores)
-    entry_id = str(uuid4())
-    now = datetime.now(timezone.utc).isoformat()
 
-    entry = {
-        "id": entry_id,
-        "patient_id": patient_id,
-        "phq9_scores": payload.phq9_scores,
-        "phq9_total": total,
-        "severity": _phq9_severity(total),
-        "notes": payload.notes,
-        "sleep_hours": payload.sleep_hours,
-        "activity_minutes": payload.activity_minutes,
-        "submitted_at": now,
-    }
+    # Store in DB — phq9_score is the total, individual scores go in notes
+    entry = MoodEntry(
+        patient_id=patient_id,
+        phq9_score=total,
+        notes=payload.notes,
+    )
+    db.add(entry)
+    await db.flush()
 
-    _mood_entries_db.setdefault(patient_id, []).append(entry)
-
-    # TODO: trigger scoring computation via event/message queue
-    return MoodEntryResponse(**entry)
+    return MoodEntryResponse(
+        id=str(entry.id),
+        patient_id=patient_id,
+        phq9_scores=payload.phq9_scores,
+        phq9_total=total,
+        severity=_phq9_severity(total),
+        notes=payload.notes,
+        sleep_hours=payload.sleep_hours,
+        activity_minutes=payload.activity_minutes,
+        submitted_at=entry.submitted_at.isoformat() if entry.submitted_at else datetime.now(timezone.utc).isoformat(),
+    )
 
 
 # ---------------------------------------------------------------------------
 # Endpoints - Consents
 # ---------------------------------------------------------------------------
 
+# Map our API boolean fields to DB ConsentType
+_CONSENT_FIELD_MAP = {
+    "data_collection": ConsentType.data_collection,
+    "data_sharing_psychiatre": ConsentType.data_sharing,
+    "ai_scoring": ConsentType.research,
+    "iot_monitoring": ConsentType.notifications,
+}
+
 
 @app.get("/patients/{patient_id}/consents", response_model=ConsentResponse)
 async def get_consents(
     patient_id: str,
+    db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """Recuperer les consentements d'un patient."""
-    if patient_id not in _patients_db:
+    pat_result = await db.execute(select(Patient.id).where(Patient.id == patient_id))
+    if pat_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient introuvable")
 
-    consent = _consents_db.get(patient_id)
-    if consent is None:
-        now = datetime.now(timezone.utc).isoformat()
-        return ConsentResponse(
-            patient_id=patient_id,
-            consents=ConsentItem(),
-            updated_at=now,
-        )
+    result = await db.execute(
+        select(Consent).where(Consent.patient_id == patient_id)
+    )
+    consents = result.scalars().all()
+
+    # Build consent item from DB rows
+    consent_dict = {}
+    latest_update = datetime.min.replace(tzinfo=timezone.utc)
+    for c in consents:
+        ct_val = c.consent_type.value if hasattr(c.consent_type, "value") else str(c.consent_type)
+        # Reverse map
+        for field_name, db_type in _CONSENT_FIELD_MAP.items():
+            if db_type.value == ct_val:
+                consent_dict[field_name] = c.is_granted
+                if c.granted_at and c.granted_at > latest_update:
+                    latest_update = c.granted_at
 
     return ConsentResponse(
-        patient_id=consent["patient_id"],
-        consents=ConsentItem(**consent["consents"]),
-        updated_at=consent["updated_at"],
+        patient_id=patient_id,
+        consents=ConsentItem(**consent_dict),
+        updated_at=latest_update.isoformat() if latest_update.year > 1 else datetime.now(timezone.utc).isoformat(),
     )
 
 
@@ -425,52 +562,127 @@ async def get_consents(
 async def update_consents(
     patient_id: str,
     payload: ConsentItem,
+    db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """Mettre a jour les consentements d'un patient."""
-    if patient_id not in _patients_db:
+    pat_result = await db.execute(select(Patient.id).where(Patient.id == patient_id))
+    if pat_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient introuvable")
 
-    now = datetime.now(timezone.utc).isoformat()
-    _consents_db[patient_id] = {
-        "patient_id": patient_id,
-        "consents": payload.model_dump(),
-        "updated_at": now,
-    }
+    now = datetime.now(timezone.utc)
+    payload_dict = payload.model_dump()
+
+    for field_name, db_type in _CONSENT_FIELD_MAP.items():
+        is_granted = payload_dict.get(field_name, False)
+        result = await db.execute(
+            select(Consent).where(
+                and_(
+                    Consent.patient_id == patient_id,
+                    Consent.consent_type == db_type,
+                )
+            )
+        )
+        consent = result.scalar_one_or_none()
+        if consent:
+            consent.is_granted = is_granted
+            consent.granted_at = now if is_granted else None
+            consent.revoked_at = now if not is_granted else None
+        else:
+            new_consent = Consent(
+                patient_id=patient_id,
+                consent_type=db_type,
+                is_granted=is_granted,
+                granted_at=now if is_granted else None,
+            )
+            db.add(new_consent)
+
+    await db.flush()
 
     return ConsentResponse(
         patient_id=patient_id,
         consents=payload,
-        updated_at=now,
+        updated_at=now.isoformat(),
     )
 
 
 # ---------------------------------------------------------------------------
-# Endpoints - Health Data Sync (Health Connect / HealthKit → HTTP POST)
+# Endpoints - Health Data Sync (Health Connect / HealthKit -> HTTP POST)
 # ---------------------------------------------------------------------------
 
 VALID_PLATFORMS = ("android_health_connect", "ios_healthkit")
 
 
-def _sync_one_entry(patient_id: str, payload: HealthDataSync) -> HealthDataSyncResponse:
-    """Logique UPSERT pour une entree de donnees de sante.
-    TODO: remplacer par vrai UPSERT PostgreSQL via SQLAlchemy.
-    """
-    now = datetime.now(timezone.utc).isoformat()
-    key = f"{patient_id}:{payload.date}"
+async def _sync_one_entry(
+    patient_id: str, payload: HealthDataSync, db: AsyncSession
+) -> HealthDataSyncResponse:
+    """UPSERT reel dans daily_aggregates via PostgreSQL ON CONFLICT."""
+    now = datetime.now(timezone.utc)
+    target_date = date.fromisoformat(payload.date)
 
-    # Placeholder: stockage en memoire
-    _health_data_db = getattr(_sync_one_entry, "_store", {})
-    upserted = key in _health_data_db
-    _health_data_db[key] = payload.model_dump()
-    _sync_one_entry._store = _health_data_db
+    values = {
+        "patient_id": patient_id,
+        "date": target_date,
+        "heart_rate_avg": payload.heart_rate_avg,
+        "heart_rate_variability": payload.heart_rate_variability,
+        "sleep_duration_min": payload.sleep_duration_min,
+        "sleep_quality_score": payload.sleep_quality_score,
+        "step_count": payload.step_count,
+        "gps_radius_km": payload.gps_radius_km,
+        "gps_locations_count": payload.gps_locations_count,
+        "screen_time_min": payload.screen_time_min,
+        "call_count": payload.call_count,
+        "call_duration_min": payload.call_duration_min,
+        "source_platform": payload.source_platform,
+        "synced_at": now,
+    }
+
+    # Check if exists first for upserted flag
+    existing = await db.execute(
+        select(DailyAggregate.id).where(
+            and_(
+                DailyAggregate.patient_id == patient_id,
+                DailyAggregate.date == target_date,
+            )
+        )
+    )
+    was_existing = existing.scalar_one_or_none() is not None
+
+    if was_existing:
+        # UPDATE
+        await db.execute(
+            select(DailyAggregate).where(
+                and_(
+                    DailyAggregate.patient_id == patient_id,
+                    DailyAggregate.date == target_date,
+                )
+            )
+        )
+        result = await db.execute(
+            select(DailyAggregate).where(
+                and_(
+                    DailyAggregate.patient_id == patient_id,
+                    DailyAggregate.date == target_date,
+                )
+            )
+        )
+        agg = result.scalar_one()
+        for key, val in values.items():
+            if key not in ("patient_id", "date") and val is not None:
+                setattr(agg, key, val)
+    else:
+        # INSERT
+        agg = DailyAggregate(**values)
+        db.add(agg)
+
+    await db.flush()
 
     return HealthDataSyncResponse(
         patient_id=patient_id,
         date=payload.date,
         source_platform=payload.source_platform,
-        synced_at=now,
-        upserted=upserted,
+        synced_at=now.isoformat(),
+        upserted=was_existing,
     )
 
 
@@ -482,6 +694,7 @@ def _sync_one_entry(patient_id: str, payload: HealthDataSync) -> HealthDataSyncR
 async def sync_health_data(
     patient_id: str,
     payload: HealthDataSync,
+    db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """
@@ -490,7 +703,6 @@ async def sync_health_data(
     puis envoie les donnees ici par HTTP POST.
     UPSERT dans daily_aggregates (patient_id, date).
     """
-    # Securite : un patient ne peut soumettre que ses propres donnees
     if current_user["role"] == "patient" and current_user["user_id"] != patient_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -503,7 +715,7 @@ async def sync_health_data(
             detail=f"source_platform doit etre l'un de : {VALID_PLATFORMS}",
         )
 
-    return _sync_one_entry(patient_id, payload)
+    return await _sync_one_entry(patient_id, payload, db)
 
 
 @app.post(
@@ -514,11 +726,12 @@ async def sync_health_data(
 async def sync_health_data_batch(
     patient_id: str,
     payload: list[HealthDataSync],
+    db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """
     Batch sync : envoyer plusieurs jours de donnees de sante en une seule requete.
-    Utile apres une periode hors ligne (le patient n'a pas ouvert l'appli pendant X jours).
+    Utile apres une periode hors ligne.
     """
     if current_user["role"] == "patient" and current_user["user_id"] != patient_id:
         raise HTTPException(
@@ -539,7 +752,7 @@ async def sync_health_data_batch(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"source_platform invalide pour la date {entry.date}",
             )
-        results.append(_sync_one_entry(patient_id, entry))
+        results.append(await _sync_one_entry(patient_id, entry, db))
 
     return HealthDataBatchResponse(
         patient_id=patient_id,
