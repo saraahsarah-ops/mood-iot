@@ -1,16 +1,20 @@
 """
 Mood-IoT : Service d'Authentification (port 8001).
 Gestion des utilisateurs, JWT, MFA (TOTP).
+Utilise PostgreSQL via SQLAlchemy async + bcrypt + pyotp.
 """
 
 from datetime import datetime, timezone
-from enum import Enum
 from typing import Optional
 from uuid import uuid4
 
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
+from passlib.context import CryptContext
+import pyotp
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.shared.config import settings
 from src.shared.auth import (
@@ -21,6 +25,7 @@ from src.shared.auth import (
     security,
 )
 from src.shared.database import get_db
+from src.shared.models import User, UserRole as DBUserRole
 
 # ---------------------------------------------------------------------------
 # Application
@@ -41,11 +46,20 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
+# Password hashing (bcrypt)
+# ---------------------------------------------------------------------------
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
 
 
-class UserRole(str, Enum):
+import enum as _enum
+
+
+class UserRoleEnum(str, _enum.Enum):
     patient = "patient"
     psychiatre = "psychiatre"
     admin = "admin"
@@ -54,7 +68,7 @@ class UserRole(str, Enum):
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8)
-    role: UserRole = UserRole.patient
+    role: UserRoleEnum = UserRoleEnum.patient
     first_name: str = Field(..., min_length=1, max_length=100)
     last_name: str = Field(..., min_length=1, max_length=100)
 
@@ -71,6 +85,14 @@ class RegisterResponse(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: dict
 
 
 class TokenResponse(BaseModel):
@@ -114,27 +136,10 @@ class MessageResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# In-memory store (placeholder until DB integration)
+# In-memory blacklist (TODO: move to Redis for distributed invalidation)
 # ---------------------------------------------------------------------------
 
-_users_db: dict[str, dict] = {}
 _blacklisted_tokens: set[str] = set()
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _hash_password(password: str) -> str:
-    """Hash password with passlib. TODO: replace with proper bcrypt."""
-    # Placeholder - in production use: from passlib.context import CryptContext
-    return f"hashed_{password}"
-
-
-def _verify_password(plain: str, hashed: str) -> bool:
-    """Verify password. TODO: replace with passlib verify."""
-    return hashed == f"hashed_{plain}"
-
 
 # ---------------------------------------------------------------------------
 # Endpoints
@@ -146,71 +151,80 @@ def _verify_password(plain: str, hashed: str) -> bool:
     response_model=RegisterResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def register(payload: RegisterRequest):
+async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Enregistrer un nouvel utilisateur."""
     # Check duplicate
-    for user in _users_db.values():
-        if user["email"] == payload.email:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Un compte avec cet email existe deja",
-            )
+    result = await db.execute(select(User).where(User.email == payload.email))
+    if result.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Un compte avec cet email existe deja",
+        )
 
-    user_id = str(uuid4())
-    now = datetime.now(timezone.utc).isoformat()
+    user = User(
+        email=payload.email,
+        password_hash=pwd_context.hash(payload.password),
+        role=DBUserRole(payload.role.value),
+        mfa_enabled=False,
+    )
+    db.add(user)
+    await db.flush()
 
-    user = {
-        "id": user_id,
-        "email": payload.email,
-        "password_hash": _hash_password(payload.password),
-        "role": payload.role.value,
-        "first_name": payload.first_name,
-        "last_name": payload.last_name,
-        "mfa_enabled": False,
-        "mfa_secret": None,
-        "created_at": now,
-    }
-    _users_db[user_id] = user
-
-    # TODO: persist to PostgreSQL via get_db()
     return RegisterResponse(
-        id=user_id,
-        email=user["email"],
-        role=user["role"],
-        first_name=user["first_name"],
-        last_name=user["last_name"],
-        created_at=now,
+        id=str(user.id),
+        email=user.email,
+        role=user.role.value,
+        first_name=payload.first_name,
+        last_name=payload.last_name,
+        created_at=user.created_at.isoformat() if user.created_at else datetime.now(timezone.utc).isoformat(),
     )
 
 
-@app.post("/auth/login", response_model=TokenResponse)
-async def login(payload: LoginRequest):
-    """Connexion - retourne access_token + refresh_token."""
-    # Find user by email
-    user = None
-    for u in _users_db.values():
-        if u["email"] == payload.email:
-            user = u
-            break
+@app.post("/auth/login")
+async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
+    """Connexion - retourne access_token + refresh_token + user info."""
+    result = await db.execute(select(User).where(User.email == payload.email))
+    user = result.scalar_one_or_none()
 
-    if user is None or not _verify_password(payload.password, user["password_hash"]):
+    if user is None or not pwd_context.verify(payload.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Email ou mot de passe incorrect",
         )
 
-    access_token = create_access_token(user["id"], user["role"])
-    refresh_token = create_refresh_token(user["id"])
+    access_token = create_access_token(str(user.id), user.role.value)
+    refresh_token = create_refresh_token(str(user.id))
 
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        expires_in=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-    )
+    # Try to find patient profile for first/last name
+    first_name = user.email.split("@")[0]
+    last_name = ""
+    if user.role == DBUserRole.patient:
+        from src.shared.models import Patient
+        pat_result = await db.execute(
+            select(Patient).where(Patient.user_id == user.id)
+        )
+        patient = pat_result.scalar_one_or_none()
+        if patient:
+            first_name = patient.first_name
+            last_name = patient.last_name
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "expires_in": settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        "user": {
+            "id": str(user.id),
+            "email": user.email,
+            "role": user.role.value,
+            "first_name": first_name,
+            "last_name": last_name,
+        },
+    }
 
 
 @app.post("/auth/refresh", response_model=TokenResponse)
-async def refresh_token(payload: RefreshRequest):
+async def refresh_token(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
     """Renouveler les tokens via un refresh_token valide."""
     token_payload = decode_token(payload.refresh_token)
 
@@ -227,7 +241,8 @@ async def refresh_token(payload: RefreshRequest):
         )
 
     user_id = token_payload["sub"]
-    user = _users_db.get(user_id)
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -237,8 +252,8 @@ async def refresh_token(payload: RefreshRequest):
     # Blacklist old refresh token
     _blacklisted_tokens.add(payload.refresh_token)
 
-    access_token = create_access_token(user["id"], user["role"])
-    new_refresh = create_refresh_token(user["id"])
+    access_token = create_access_token(str(user.id), user.role.value)
+    new_refresh = create_refresh_token(str(user.id))
 
     return TokenResponse(
         access_token=access_token,
@@ -248,19 +263,22 @@ async def refresh_token(payload: RefreshRequest):
 
 
 @app.post("/auth/mfa/setup", response_model=MFASetupResponse)
-async def mfa_setup(current_user: dict = Depends(get_current_user)):
+async def mfa_setup(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Configurer l'authentification multi-facteurs (TOTP)."""
-    user = _users_db.get(current_user["user_id"])
+    result = await db.execute(select(User).where(User.id == current_user["user_id"]))
+    user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Utilisateur introuvable")
 
-    # TODO: generate real TOTP secret with pyotp
-    secret = f"TOTP_SECRET_{uuid4().hex[:16].upper()}"
-    user["mfa_secret"] = secret
+    secret = pyotp.random_base32()
+    user.mfa_secret = secret
+    await db.flush()
 
-    qr_url = (
-        f"otpauth://totp/Mood-IoT:{user['email']}?secret={secret}&issuer=Mood-IoT"
-    )
+    totp = pyotp.TOTP(secret)
+    qr_url = totp.provisioning_uri(name=user.email, issuer_name="Mood-IoT")
 
     return MFASetupResponse(
         secret=secret,
@@ -273,23 +291,26 @@ async def mfa_setup(current_user: dict = Depends(get_current_user)):
 async def mfa_verify(
     payload: MFAVerifyRequest,
     current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Verifier un code TOTP et activer la MFA."""
-    user = _users_db.get(current_user["user_id"])
+    result = await db.execute(select(User).where(User.id == current_user["user_id"]))
+    user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Utilisateur introuvable")
 
-    if user.get("mfa_secret") is None:
+    if user.mfa_secret is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="MFA non configuree, appelez /auth/mfa/setup d'abord",
         )
 
-    # TODO: verify code with pyotp.TOTP(user["mfa_secret"]).verify(payload.code)
-    is_valid = len(payload.code) == 6 and payload.code.isdigit()
+    totp = pyotp.TOTP(user.mfa_secret)
+    is_valid = totp.verify(payload.code)
 
     if is_valid:
-        user["mfa_enabled"] = True
+        user.mfa_enabled = True
+        await db.flush()
 
     return MFAVerifyResponse(
         verified=is_valid,
@@ -300,26 +321,52 @@ async def mfa_verify(
 @app.delete("/auth/logout", response_model=MessageResponse)
 async def logout(current_user: dict = Depends(get_current_user)):
     """Deconnexion - blackliste le token courant."""
-    # TODO: blacklist token in Redis for distributed invalidation
     return MessageResponse(message="Deconnexion reussie")
 
 
 @app.get("/auth/me", response_model=UserResponse)
-async def get_me(current_user: dict = Depends(get_current_user)):
+async def get_me(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Recuperer les informations de l'utilisateur connecte."""
-    user = _users_db.get(current_user["user_id"])
+    result = await db.execute(select(User).where(User.id == current_user["user_id"]))
+    user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Utilisateur introuvable")
 
+    # Try to get name from patient profile
+    first_name = user.email.split("@")[0]
+    last_name = ""
+    if user.role == DBUserRole.patient:
+        from src.shared.models import Patient
+        pat_result = await db.execute(
+            select(Patient).where(Patient.user_id == user.id)
+        )
+        patient = pat_result.scalar_one_or_none()
+        if patient:
+            first_name = patient.first_name
+            last_name = patient.last_name
+
     return UserResponse(
-        id=user["id"],
-        email=user["email"],
-        role=user["role"],
-        first_name=user["first_name"],
-        last_name=user["last_name"],
-        mfa_enabled=user["mfa_enabled"],
-        created_at=user["created_at"],
+        id=str(user.id),
+        email=user.email,
+        role=user.role.value,
+        first_name=first_name,
+        last_name=last_name,
+        mfa_enabled=user.mfa_enabled,
+        created_at=user.created_at.isoformat() if user.created_at else "",
     )
+
+
+# ---------------------------------------------------------------------------
+# Health check
+# ---------------------------------------------------------------------------
+
+
+@app.get("/auth/health")
+async def health():
+    return {"status": "healthy", "service": "auth"}
 
 
 # ---------------------------------------------------------------------------

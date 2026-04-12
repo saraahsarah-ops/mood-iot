@@ -6,19 +6,19 @@
 INSERT INTO users (id, email, password_hash, role, mfa_enabled) VALUES
     ('a0000000-0000-0000-0000-000000000001', 'dr.martin@mood-iot.fr',
      -- password: MoodIoT2026! (bcrypt)
-     '$2b$12$LJ3m8Cq5Q4Z9v5e6f7g8hOiJkLmNoPqRsTuVwXyZ0123456789ab',
+     '$2b$12$rlUy7ToqKYbBg2p32VwfCeItT0Osyts6c69rZ8bXmLPpoU2Q3brIq',
      'psychiatre', false);
 
 -- 4 patientes (profils du simulateur)
 INSERT INTO users (id, email, password_hash, role) VALUES
     ('b0000000-0000-0000-0000-000000000001', 'sophie.dupont@email.fr',
-     '$2b$12$LJ3m8Cq5Q4Z9v5e6f7g8hOiJkLmNoPqRsTuVwXyZ0123456789ab', 'patient'),
+     '$2b$12$rlUy7ToqKYbBg2p32VwfCeItT0Osyts6c69rZ8bXmLPpoU2Q3brIq', 'patient'),
     ('b0000000-0000-0000-0000-000000000002', 'marie.laurent@email.fr',
-     '$2b$12$LJ3m8Cq5Q4Z9v5e6f7g8hOiJkLmNoPqRsTuVwXyZ0123456789ab', 'patient'),
+     '$2b$12$rlUy7ToqKYbBg2p32VwfCeItT0Osyts6c69rZ8bXmLPpoU2Q3brIq', 'patient'),
     ('b0000000-0000-0000-0000-000000000003', 'lea.moreau@email.fr',
-     '$2b$12$LJ3m8Cq5Q4Z9v5e6f7g8hOiJkLmNoPqRsTuVwXyZ0123456789ab', 'patient'),
+     '$2b$12$rlUy7ToqKYbBg2p32VwfCeItT0Osyts6c69rZ8bXmLPpoU2Q3brIq', 'patient'),
     ('b0000000-0000-0000-0000-000000000004', 'anna.bernard@email.fr',
-     '$2b$12$LJ3m8Cq5Q4Z9v5e6f7g8hOiJkLmNoPqRsTuVwXyZ0123456789ab', 'patient');
+     '$2b$12$rlUy7ToqKYbBg2p32VwfCeItT0Osyts6c69rZ8bXmLPpoU2Q3brIq', 'patient');
 
 INSERT INTO patients (id, user_id, first_name, last_name, date_of_birth, gender, diagnosis, treatment_start_date, baseline_status) VALUES
     ('c0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001',

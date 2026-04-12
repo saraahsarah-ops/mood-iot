@@ -130,8 +130,9 @@ async def on_startup():
 
 
 @app.get("/health")
+@app.get("/scoring/health")
 async def health():
-    return {"status": "ok", "service": "scoring", "version": "2.0.0"}
+    return {"status": "healthy", "service": "scoring"}
 
 
 @app.post(
