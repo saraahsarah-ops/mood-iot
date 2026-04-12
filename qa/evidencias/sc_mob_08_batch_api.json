@@ -27,30 +27,30 @@
   "response": {
     "patient_id": "c0000000-0000-0000-0000-000000000001",
     "synced_count": 3,
-    "synced_at": "2026-04-12T21:15:52.495874+00:00",
+    "synced_at": "2026-04-12T22:35:26.892937+00:00",
     "results": [
       {
         "patient_id": "c0000000-0000-0000-0000-000000000001",
         "date": "2026-04-06",
         "source_platform": "android_health_connect",
-        "synced_at": "2026-04-12T21:15:52.463511+00:00",
+        "synced_at": "2026-04-12T22:35:26.875233+00:00",
         "upserted": true
       },
       {
         "patient_id": "c0000000-0000-0000-0000-000000000001",
         "date": "2026-04-07",
         "source_platform": "android_health_connect",
-        "synced_at": "2026-04-12T21:15:52.476963+00:00",
+        "synced_at": "2026-04-12T22:35:26.881767+00:00",
         "upserted": true
       },
       {
         "patient_id": "c0000000-0000-0000-0000-000000000001",
         "date": "2026-04-08",
         "source_platform": "android_health_connect",
-        "synced_at": "2026-04-12T21:15:52.485605+00:00",
+        "synced_at": "2026-04-12T22:35:26.888710+00:00",
         "upserted": true
       }
     ]
   },
-  "timestamp": "2026-04-12T15:15:52.547237"
+  "timestamp": "2026-04-12T16:35:26.911389"
 }

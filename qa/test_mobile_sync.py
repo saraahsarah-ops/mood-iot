@@ -1,5 +1,7 @@
+import sys, io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 """
-Tests QA — Flux App Mobile Health Connect → Backend → PostgreSQL
+Tests QA — Flux App Mobile Health Connect -> Backend -> PostgreSQL
 ================================================================
 Prend des captures d'ecran de chaque etape du flux de synchronisation
 et verifie que les donnees arrivent dans la base de donnees.
