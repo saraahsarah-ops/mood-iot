@@ -1,25 +1,46 @@
 """
 Mood-IoT : Service de Notifications (port 8004).
 Envoi et gestion des alertes selon les niveaux d'escalade.
+Connecte a PostgreSQL via SQLAlchemy async + WebSocket temps reel.
 
 Niveaux d'escalade :
-  - Level 1 (score 40-60)  : coaching IA
-  - Level 2 (score 60-80)  : alerte psychiatre
-  - Level 3 (score 80-100) : urgence
+  - Level 1 (score 40-60)  : coaching IA (Claude API)
+  - Level 2 (score 60-80)  : alerte psychiatre (WS + SMS + FCM + Email)
+  - Level 3 (score 80-100) : urgence (tout Level 2 + appel + teleconsult auto)
 """
 
+import logging
 from datetime import datetime, timezone
-from enum import Enum
 from typing import Optional
-from uuid import uuid4
 
-from fastapi import FastAPI, Depends, HTTPException, Query, status
+from fastapi import (
+    FastAPI,
+    Depends,
+    HTTPException,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from sqlalchemy import select, and_, func, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.shared.config import settings
 from src.shared.auth import get_current_user, require_role
 from src.shared.database import get_db
+from src.shared.models import (
+    Notification,
+    EscalationLog,
+    NotificationType,
+    NotificationChannel as NotifChannelEnum,
+    NotificationStatus,
+)
+from src.notification.escalation import EscalationEngine
+from src.notification.channels import ws_channel
+
+logger = logging.getLogger("mood_iot.notification")
 
 # ---------------------------------------------------------------------------
 # Application
@@ -27,8 +48,8 @@ from src.shared.database import get_db
 
 app = FastAPI(
     title="Mood-IoT Notification Service",
-    version="1.0.0",
-    description="Service de notifications et alertes d'escalade",
+    version="2.0.0",
+    description="Service de notifications avec escalade reelle et WebSocket",
 )
 
 app.add_middleware(
@@ -40,99 +61,32 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
-# Escalation configuration
-# ---------------------------------------------------------------------------
-
-THRESHOLDS = settings.scoring_thresholds_tuple  # (40, 60, 80)
-
-
-class EscalationLevel(int, Enum):
-    level_1 = 1  # 40-60 : coaching IA
-    level_2 = 2  # 60-80 : alerte psychiatre
-    level_3 = 3  # 80-100 : urgence
-
-
-class NotificationChannel(str, Enum):
-    push = "push"
-    email = "email"
-    sms = "sms"
-    in_app = "in_app"
-
-
-class NotificationPriority(str, Enum):
-    low = "low"
-    normal = "normal"
-    high = "high"
-    urgent = "urgent"
-
-
-ESCALATION_CONFIG = {
-    EscalationLevel.level_1: {
-        "label": "Coaching IA",
-        "channels": [NotificationChannel.in_app, NotificationChannel.push],
-        "priority": NotificationPriority.normal,
-        "description": "Score moderee (40-60) - suggestions de coaching IA",
-    },
-    EscalationLevel.level_2: {
-        "label": "Alerte Psychiatre",
-        "channels": [
-            NotificationChannel.in_app,
-            NotificationChannel.push,
-            NotificationChannel.email,
-        ],
-        "priority": NotificationPriority.high,
-        "description": "Score eleve (60-80) - notification au psychiatre referent",
-    },
-    EscalationLevel.level_3: {
-        "label": "Urgence",
-        "channels": [
-            NotificationChannel.in_app,
-            NotificationChannel.push,
-            NotificationChannel.email,
-            NotificationChannel.sms,
-        ],
-        "priority": NotificationPriority.urgent,
-        "description": "Score critique (80-100) - protocole d'urgence active",
-    },
-}
-
-
-def _determine_escalation(score: float) -> Optional[EscalationLevel]:
-    if score >= THRESHOLDS[2]:
-        return EscalationLevel.level_3
-    elif score >= THRESHOLDS[1]:
-        return EscalationLevel.level_2
-    elif score >= THRESHOLDS[0]:
-        return EscalationLevel.level_1
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Pydantic models
+# Modeles Pydantic
 # ---------------------------------------------------------------------------
 
 
 class SendNotificationRequest(BaseModel):
     patient_id: str
-    title: str = Field(..., min_length=1, max_length=200)
-    body: str = Field(..., min_length=1, max_length=2000)
-    channel: NotificationChannel = NotificationChannel.in_app
-    priority: NotificationPriority = NotificationPriority.normal
-    score: Optional[float] = Field(None, ge=0, le=100, description="Score de risque associe")
-    metadata: Optional[dict] = None
+    score: Optional[float] = Field(None, ge=0, le=100)
+    alert_level: Optional[int] = Field(None, ge=0, le=3)
+    risk_score_id: Optional[str] = None
+    shap_explanations: Optional[list[str]] = None
+    title: Optional[str] = Field(None, max_length=255)
+    body: Optional[str] = Field(None, max_length=2000)
 
 
 class NotificationResponse(BaseModel):
     id: str
     patient_id: str
+    type: str
+    level: int
+    channel: str
     title: str
     body: str
-    channel: str
-    priority: str
-    escalation_level: Optional[int]
-    escalation_label: Optional[str]
-    acknowledged: bool
-    acknowledged_at: Optional[str]
+    recipient_user_id: str
+    status: str
+    sent_at: Optional[str]
+    read_at: Optional[str]
     created_at: str
 
 
@@ -144,95 +98,182 @@ class NotificationListResponse(BaseModel):
 
 class AcknowledgeResponse(BaseModel):
     id: str
-    acknowledged: bool
-    acknowledged_at: str
+    status: str
+    read_at: str
+
+
+class UnreadCountResponse(BaseModel):
+    patient_id: str
+    unread_count: int
+
+
+class EscalationSummary(BaseModel):
+    alert_level: int
+    channels_used: list[str]
+    notifications_created: int
+    success: bool
 
 
 # ---------------------------------------------------------------------------
-# In-memory store (placeholder)
+# Helpers
 # ---------------------------------------------------------------------------
 
-_notifications_db: dict[str, dict] = {}
-_patient_notifications: dict[str, list[str]] = {}
+
+def _notif_to_response(n: Notification) -> NotificationResponse:
+    return NotificationResponse(
+        id=str(n.id),
+        patient_id=str(n.patient_id),
+        type=n.type.value if hasattr(n.type, "value") else str(n.type),
+        level=n.level,
+        channel=n.channel.value if hasattr(n.channel, "value") else str(n.channel),
+        title=n.title,
+        body=n.body,
+        recipient_user_id=str(n.recipient_user_id),
+        status=n.status.value if hasattr(n.status, "value") else str(n.status),
+        sent_at=n.sent_at.isoformat() if n.sent_at else None,
+        read_at=n.read_at.isoformat() if n.read_at else None,
+        created_at=n.created_at.isoformat() if n.created_at else "",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Startup
+# ---------------------------------------------------------------------------
+
+
+@app.on_event("startup")
+async def on_startup():
+    logger.info("Service Notification demarre sur le port 8004")
+    logger.info("Seuils d'escalade : %s", settings.scoring_thresholds_tuple)
+
 
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 
+@app.get("/health")
+async def health():
+    return {"status": "ok", "service": "notification", "version": "2.0.0"}
+
+
 @app.post(
     "/notifications/send",
-    response_model=NotificationResponse,
+    response_model=EscalationSummary,
     status_code=status.HTTP_201_CREATED,
 )
 async def send_notification(
     payload: SendNotificationRequest,
+    db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """Envoyer une notification. L'escalade est determinee automatiquement si un score est fourni."""
-    escalation_level = None
-    escalation_label = None
+    """
+    Envoyer une notification.
+    Si un score est fourni, l'escalade est declenchee automatiquement.
+    """
+    if payload.score is not None and payload.alert_level is not None and payload.alert_level >= 1:
+        # Escalade automatique
+        engine = EscalationEngine()
+        result = await engine.process_alert(
+            patient_id=payload.patient_id,
+            score=payload.score,
+            alert_level=payload.alert_level,
+            risk_score_id=payload.risk_score_id or "",
+            shap_explanations=payload.shap_explanations or [],
+            db=db,
+        )
 
-    if payload.score is not None:
-        level = _determine_escalation(payload.score)
-        if level is not None:
-            escalation_level = level.value
-            config = ESCALATION_CONFIG[level]
-            escalation_label = config["label"]
-            # Override priority based on escalation
-            payload.priority = config["priority"]
+        return EscalationSummary(
+            alert_level=payload.alert_level,
+            channels_used=result.get("channels_used", []),
+            notifications_created=result.get("notifications_created", 0),
+            success=result.get("success", False),
+        )
 
-            # TODO: send through all channels defined in config["channels"]
-            # - Push: FCM (settings.FCM_CREDENTIALS_JSON)
-            # - Email: SES (settings.SES_FROM_EMAIL)
-            # - SMS: Twilio (settings.TWILIO_*)
-            # - In-app: store in DB
+    # Notification manuelle (pas d'escalade)
+    if not payload.title or not payload.body:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="titre et corps requis pour une notification manuelle",
+        )
 
-    notif_id = str(uuid4())
-    now = datetime.now(timezone.utc).isoformat()
+    notif = Notification(
+        patient_id=payload.patient_id,
+        type=NotificationType.system,
+        level=1,
+        channel=NotifChannelEnum.websocket,
+        title=payload.title,
+        body=payload.body,
+        recipient_user_id=current_user["user_id"],
+        status=NotificationStatus.sent,
+        sent_at=datetime.now(timezone.utc),
+    )
+    db.add(notif)
+    await db.commit()
+    await db.refresh(notif)
 
-    notification = {
-        "id": notif_id,
-        "patient_id": payload.patient_id,
-        "title": payload.title,
-        "body": payload.body,
-        "channel": payload.channel.value,
-        "priority": payload.priority.value,
-        "escalation_level": escalation_level,
-        "escalation_label": escalation_label,
-        "acknowledged": False,
-        "acknowledged_at": None,
-        "created_at": now,
-    }
+    logger.info("Notification manuelle creee: %s", notif.id)
 
-    _notifications_db[notif_id] = notification
-    _patient_notifications.setdefault(payload.patient_id, []).append(notif_id)
-
-    # TODO: persist to PostgreSQL, dispatch to actual channels
-    return NotificationResponse(**notification)
+    return EscalationSummary(
+        alert_level=0,
+        channels_used=["manual"],
+        notifications_created=1,
+        success=True,
+    )
 
 
 @app.get("/notifications/{patient_id}", response_model=NotificationListResponse)
 async def list_notifications(
     patient_id: str,
     unread_only: bool = Query(False),
+    notification_type: Optional[str] = Query(None, description="Filtrer par type: coaching_ia, alerte_psychiatre, urgence, system"),
     limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """Lister les notifications d'un patient."""
-    notif_ids = _patient_notifications.get(patient_id, [])
-    all_notifs = [_notifications_db[nid] for nid in notif_ids]
+    query = select(Notification).where(Notification.patient_id == patient_id)
 
     if unread_only:
-        all_notifs = [n for n in all_notifs if not n["acknowledged"]]
+        query = query.where(Notification.status != NotificationStatus.read)
 
-    unread_count = sum(1 for n in all_notifs if not n["acknowledged"])
-    page_data = all_notifs[-limit:]
+    if notification_type:
+        try:
+            ntype = NotificationType(notification_type)
+            query = query.where(Notification.type == ntype)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Type invalide: {notification_type}",
+            )
+
+    # Total
+    count_q = select(func.count(Notification.id)).where(
+        Notification.patient_id == patient_id
+    )
+    total_result = await db.execute(count_q)
+    total = total_result.scalar() or 0
+
+    # Non lues
+    unread_q = select(func.count(Notification.id)).where(
+        and_(
+            Notification.patient_id == patient_id,
+            Notification.status != NotificationStatus.read,
+        )
+    )
+    unread_result = await db.execute(unread_q)
+    unread = unread_result.scalar() or 0
+
+    # Resultats pagines
+    query = query.order_by(Notification.created_at.desc()).offset(offset).limit(limit)
+    result = await db.execute(query)
+    rows = result.scalars().all()
 
     return NotificationListResponse(
-        notifications=[NotificationResponse(**n) for n in page_data],
-        total=len(all_notifs),
-        unread=unread_count,
+        notifications=[_notif_to_response(n) for n in rows],
+        total=total,
+        unread=unread,
     )
 
 
@@ -242,25 +283,83 @@ async def list_notifications(
 )
 async def acknowledge_notification(
     notification_id: str,
+    db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """Marquer une notification comme lue."""
-    notification = _notifications_db.get(notification_id)
+    result = await db.execute(
+        select(Notification).where(Notification.id == notification_id)
+    )
+    notification = result.scalar_one_or_none()
+
     if notification is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Notification introuvable",
         )
 
-    now = datetime.now(timezone.utc).isoformat()
-    notification["acknowledged"] = True
-    notification["acknowledged_at"] = now
+    now = datetime.now(timezone.utc)
+    notification.status = NotificationStatus.read
+    notification.read_at = now
+    await db.commit()
+
+    logger.info("Notification %s marquee comme lue", notification_id)
 
     return AcknowledgeResponse(
         id=notification_id,
-        acknowledged=True,
-        acknowledged_at=now,
+        status="read",
+        read_at=now.isoformat(),
     )
+
+
+@app.get(
+    "/notifications/unread-count/{patient_id}",
+    response_model=UnreadCountResponse,
+)
+async def unread_count(
+    patient_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Compter les notifications non lues d'un patient."""
+    result = await db.execute(
+        select(func.count(Notification.id)).where(
+            and_(
+                Notification.patient_id == patient_id,
+                Notification.status != NotificationStatus.read,
+            )
+        )
+    )
+    count = result.scalar() or 0
+
+    return UnreadCountResponse(patient_id=patient_id, unread_count=count)
+
+
+# ---------------------------------------------------------------------------
+# WebSocket — alertes en temps reel pour le dashboard psychiatre
+# ---------------------------------------------------------------------------
+
+
+@app.websocket("/notifications/ws/{user_id}")
+async def websocket_alerts(websocket: WebSocket, user_id: str):
+    """
+    Connexion WebSocket pour recevoir les alertes en temps reel.
+    Utilise par le dashboard du psychiatre.
+    """
+    await websocket.accept()
+    ws_channel.register(user_id, websocket)
+    logger.info("WebSocket connecte pour user %s", user_id)
+
+    try:
+        while True:
+            # Garder la connexion ouverte, attendre les messages du client
+            data = await websocket.receive_text()
+            # Le client peut envoyer un "ping" pour keep-alive
+            if data == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        ws_channel.unregister(user_id)
+        logger.info("WebSocket deconnecte pour user %s", user_id)
 
 
 # ---------------------------------------------------------------------------

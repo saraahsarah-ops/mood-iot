@@ -1,0 +1,47 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "API Gateway",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "src.gateway.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"],
+      "port": 8000
+    },
+    {
+      "name": "Auth Service",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "src.auth.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"],
+      "port": 8001
+    },
+    {
+      "name": "Patient Service",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "src.patient.main:app", "--host", "0.0.0.0", "--port", "8002", "--reload"],
+      "port": 8002
+    },
+    {
+      "name": "ML Scoring Service",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "src.scoring.main:app", "--host", "0.0.0.0", "--port", "8003", "--reload"],
+      "port": 8003
+    },
+    {
+      "name": "Notification Service",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "src.notification.main:app", "--host", "0.0.0.0", "--port", "8004", "--reload"],
+      "port": 8004
+    },
+    {
+      "name": "Teleconsult Service",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "src.teleconsult.main:app", "--host", "0.0.0.0", "--port", "8005", "--reload"],
+      "port": 8005
+    },
+    {
+      "name": "Docker Compose (infra)",
+      "runtimeExecutable": "docker",
+      "runtimeArgs": ["compose", "up", "-d", "postgres", "redis", "mosquitto", "localstack"],
+      "port": 5432
+    }
+  ]
+}

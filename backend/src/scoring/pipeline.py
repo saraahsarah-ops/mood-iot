@@ -1,0 +1,1067 @@
+"""
+Mood-IoT : Pipeline de scoring ML pour l'evaluation du risque patient.
+
+Ce module implementee le pipeline complet de calcul du score de risque (0-100)
+a partir des donnees capteurs IoT agreges quotidiennement.
+
+Flux du pipeline :
+    1. Recuperer les agregats quotidiens (daily_aggregates) du patient
+    2. Recuperer les baselines historiques du patient
+    3. Calculer les Z-scores par rapport aux baselines
+    4. Construire le vecteur de features (Z-scores + tendances)
+    5. Prediction XGBoost → score 0-100
+    6. Explication SHAP → features contributives
+    7. Determiner le niveau d'alerte (0-3)
+    8. Persister dans feature_vectors et risk_scores
+    9. Retourner le resultat
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import math
+import os
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Optional
+from uuid import uuid4
+
+import numpy as np
+from sqlalchemy import select, and_, func
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.shared.config import settings
+from src.shared.database import AsyncSessionLocal
+from src.shared.models import (
+    DailyAggregate,
+    Baseline,
+    FeatureVector,
+    RiskScore,
+    ModelVersion,
+)
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+
+logger = logging.getLogger("mood-iot.scoring.pipeline")
+
+# ── Constantes ────────────────────────────────────────────────────────────────
+
+# Correspondance entre les colonnes daily_aggregates et les noms de metriques
+# dans la table baselines (metric_name)
+METRIC_MAPPING: dict[str, str] = {
+    "heart_rate_avg": "heart_rate_avg",
+    "heart_rate_variability": "heart_rate_variability",
+    "sleep_duration_min": "sleep_duration_min",
+    "sleep_quality_score": "sleep_quality_score",
+    "step_count": "step_count",
+    "gps_radius_km": "gps_radius_km",
+    "screen_time_min": "screen_time_min",
+    "call_count": "call_count",
+}
+
+# Correspondance entre les metriques et les noms de Z-scores dans feature_vectors
+ZSCORE_COLUMN_MAPPING: dict[str, str] = {
+    "heart_rate_avg": "z_heart_rate",
+    "heart_rate_variability": "z_hrv",
+    "sleep_duration_min": "z_sleep_duration",
+    "sleep_quality_score": "z_sleep_quality",
+    "step_count": "z_step_count",
+    "gps_radius_km": "z_gps_radius",
+    "screen_time_min": "z_screen_time",
+    "call_count": "z_call_frequency",
+}
+
+# Poids pour le modele heuristique de repli (somme = 1.0)
+HEURISTIC_WEIGHTS: dict[str, float] = {
+    "z_sleep_duration": 0.20,
+    "z_sleep_quality": 0.15,
+    "z_heart_rate": 0.15,
+    "z_hrv": 0.15,
+    "z_step_count": 0.10,
+    "z_gps_radius": 0.10,
+    "z_screen_time": 0.10,
+    "z_call_frequency": 0.05,
+}
+
+# Ecart-type minimal pour eviter la division par zero
+MIN_STD = 1e-6
+
+# Chemin local par defaut pour le modele XGBoost
+DEFAULT_MODEL_PATH = Path("models/xgboost_risk_model.json")
+
+# Seuils d'alerte depuis la configuration
+_t1, _t2, _t3 = settings.scoring_thresholds_tuple  # (40, 60, 80)
+
+# Version courante du modele heuristique
+HEURISTIC_MODEL_VERSION = "heuristic-v1.0.0"
+
+# ── Messages SHAP en francais ────────────────────────────────────────────────
+
+# Modeles de messages explicatifs lisibles par les cliniciens
+SHAP_MESSAGES_FR: dict[str, dict[str, str]] = {
+    "z_heart_rate": {
+        "high": "Frequence cardiaque elevee (+{sigma:.1f}\u03c3)",
+        "low": "Frequence cardiaque basse ({sigma:.1f}\u03c3)",
+        "normal": "Frequence cardiaque dans la norme",
+    },
+    "z_hrv": {
+        "high": "Variabilite cardiaque anormalement elevee (+{sigma:.1f}\u03c3)",
+        "low": "Variabilite cardiaque reduite ({sigma:.1f}\u03c3)",
+        "normal": "Variabilite cardiaque normale",
+    },
+    "z_sleep_duration": {
+        "high": "Sommeil excessif (+{sigma:.1f}\u03c3 par rapport a la baseline)",
+        "low": "Sommeil reduit de {sigma_abs:.1f}\u03c3 par rapport a la baseline",
+        "normal": "Duree de sommeil normale",
+    },
+    "z_sleep_quality": {
+        "high": "Qualite de sommeil anormalement elevee (+{sigma:.1f}\u03c3)",
+        "low": "Qualite de sommeil degradee ({sigma:.1f}\u03c3)",
+        "normal": "Qualite de sommeil dans la norme",
+    },
+    "z_step_count": {
+        "high": "Activite physique elevee (+{sigma:.1f}\u03c3)",
+        "low": "Activite physique en baisse ({sigma:.1f}\u03c3)",
+        "normal": "Activite physique normale",
+    },
+    "z_gps_radius": {
+        "high": "Rayon de mobilite GPS elargi (+{sigma:.1f}\u03c3)",
+        "low": "Mobilite GPS en baisse ({sigma:.1f}\u03c3)",
+        "normal": "Mobilite GPS dans la norme",
+    },
+    "z_screen_time": {
+        "high": "Temps d'ecran excessif (+{sigma:.1f}\u03c3)",
+        "low": "Temps d'ecran reduit ({sigma:.1f}\u03c3)",
+        "normal": "Temps d'ecran normal",
+    },
+    "z_call_frequency": {
+        "high": "Frequence d'appels elevee (+{sigma:.1f}\u03c3)",
+        "low": "Frequence d'appels en baisse ({sigma:.1f}\u03c3)",
+        "normal": "Frequence d'appels normale",
+    },
+}
+
+
+def _generate_shap_message(feature_name: str, z_value: float) -> str:
+    """Generer un message explicatif en francais pour une feature donnee."""
+    templates = SHAP_MESSAGES_FR.get(feature_name, {})
+    sigma_abs = abs(z_value)
+
+    if sigma_abs < 1.0:
+        return templates.get("normal", f"{feature_name} dans la norme")
+
+    if z_value > 0:
+        return templates.get("high", f"{feature_name} eleve (+{z_value:.1f}\u03c3)").format(
+            sigma=z_value, sigma_abs=sigma_abs
+        )
+    else:
+        return templates.get("low", f"{feature_name} bas ({z_value:.1f}\u03c3)").format(
+            sigma=z_value, sigma_abs=sigma_abs
+        )
+
+
+def _determine_alert_level(score: float) -> int:
+    """
+    Determiner le niveau d'alerte en fonction du score.
+
+    Niveaux :
+        0 : score < 40  (faible)
+        1 : 40 <= score < 60  (modere)
+        2 : 60 <= score < 80  (eleve)
+        3 : score >= 80  (critique)
+    """
+    if score < _t1:
+        return 0
+    elif score < _t2:
+        return 1
+    elif score < _t3:
+        return 2
+    else:
+        return 3
+
+
+# ── Pipeline principal ────────────────────────────────────────────────────────
+
+
+class ScoringPipeline:
+    """
+    Pipeline de scoring ML pour Mood-IoT.
+
+    Charge un modele XGBoost depuis un chemin local (ou un modele heuristique
+    de repli si aucun modele entraine n'est disponible), puis calcule le score
+    de risque d'un patient a partir de ses donnees capteurs quotidiennes.
+    """
+
+    def __init__(self, model_path: Optional[Path] = None) -> None:
+        """
+        Initialiser le pipeline de scoring.
+
+        Args:
+            model_path: Chemin vers le fichier du modele XGBoost (.json).
+                        Si None, utilise le chemin par defaut.
+        """
+        self._model_path = model_path or DEFAULT_MODEL_PATH
+        self._model = None
+        self._model_version: str = HEURISTIC_MODEL_VERSION
+        self._use_heuristic: bool = True
+        self._load_model()
+
+    # ── Chargement du modele ──────────────────────────────────────────────
+
+    def _load_model(self) -> None:
+        """
+        Charger le modele XGBoost depuis le disque.
+
+        Si le fichier n'existe pas ou si XGBoost n'est pas installe,
+        on bascule sur le modele heuristique de repli.
+        """
+        if not self._model_path.exists():
+            logger.warning(
+                "Modele XGBoost introuvable a '%s'. "
+                "Utilisation du modele heuristique de repli.",
+                self._model_path,
+            )
+            self._use_heuristic = True
+            return
+
+        try:
+            import xgboost as xgb
+
+            model = xgb.XGBRegressor()
+            model.load_model(str(self._model_path))
+            self._model = model
+            self._use_heuristic = False
+
+            # Recuperer la version du modele depuis les metadonnees du fichier
+            self._model_version = f"xgboost-{self._model_path.stem}"
+            logger.info(
+                "Modele XGBoost charge avec succes depuis '%s' (version: %s)",
+                self._model_path,
+                self._model_version,
+            )
+        except ImportError:
+            logger.warning(
+                "Le package xgboost n'est pas installe. "
+                "Utilisation du modele heuristique de repli."
+            )
+            self._use_heuristic = True
+        except Exception as exc:
+            logger.error(
+                "Erreur lors du chargement du modele XGBoost : %s. "
+                "Basculement sur le modele heuristique.",
+                exc,
+            )
+            self._use_heuristic = True
+
+    # ── Etape 1 : Recuperer les agregats quotidiens ──────────────────────
+
+    async def _fetch_daily_aggregates(
+        self, patient_id: str, target_date: date, db: AsyncSession
+    ) -> Optional[DailyAggregate]:
+        """
+        Recuperer les agregats quotidiens d'un patient pour une date donnee.
+
+        Args:
+            patient_id: Identifiant unique du patient.
+            target_date: Date cible du scoring.
+            db: Session asynchrone SQLAlchemy.
+
+        Returns:
+            L'objet DailyAggregate ou None si aucune donnee n'est disponible.
+        """
+        stmt = select(DailyAggregate).where(
+            and_(
+                DailyAggregate.patient_id == patient_id,
+                DailyAggregate.date == target_date,
+            )
+        )
+        result = await db.execute(stmt)
+        aggregate = result.scalar_one_or_none()
+
+        if aggregate is None:
+            logger.warning(
+                "Aucun agregat quotidien pour le patient %s a la date %s",
+                patient_id,
+                target_date,
+            )
+        return aggregate
+
+    # ── Etape 2 : Recuperer les baselines ────────────────────────────────
+
+    async def _fetch_baselines(
+        self, patient_id: str, db: AsyncSession
+    ) -> dict[str, dict[str, float]]:
+        """
+        Recuperer les baselines historiques d'un patient.
+
+        Args:
+            patient_id: Identifiant unique du patient.
+            db: Session asynchrone SQLAlchemy.
+
+        Returns:
+            Dictionnaire {metric_name: {"mean": float, "std": float}}.
+        """
+        stmt = select(Baseline).where(Baseline.patient_id == patient_id)
+        result = await db.execute(stmt)
+        baselines_rows = result.scalars().all()
+
+        baselines: dict[str, dict[str, float]] = {}
+        for row in baselines_rows:
+            baselines[row.metric_name] = {
+                "mean": float(row.mean_value),
+                "std": max(float(row.std_value), MIN_STD),
+            }
+
+        if not baselines:
+            logger.warning(
+                "Aucune baseline trouvee pour le patient %s", patient_id
+            )
+        return baselines
+
+    # ── Etape 3 : Calculer les Z-scores ──────────────────────────────────
+
+    def _compute_zscores(
+        self,
+        aggregate: DailyAggregate,
+        baselines: dict[str, dict[str, float]],
+    ) -> dict[str, float]:
+        """
+        Calculer les Z-scores pour chaque metrique capteur.
+
+        Formule : z = (valeur_courante - baseline_mean) / baseline_std
+
+        Args:
+            aggregate: Agregats quotidiens du patient.
+            baselines: Baselines historiques {metric: {mean, std}}.
+
+        Returns:
+            Dictionnaire {z_feature_name: z_value}.
+        """
+        zscores: dict[str, float] = {}
+
+        for metric_col, metric_name in METRIC_MAPPING.items():
+            current_value = getattr(aggregate, metric_col, None)
+            if current_value is None:
+                logger.debug("Metrique '%s' absente des agregats", metric_col)
+                continue
+
+            baseline = baselines.get(metric_name)
+            if baseline is None:
+                logger.debug(
+                    "Pas de baseline pour la metrique '%s'", metric_name
+                )
+                continue
+
+            z = (float(current_value) - baseline["mean"]) / baseline["std"]
+            z_col = ZSCORE_COLUMN_MAPPING[metric_col]
+            zscores[z_col] = round(z, 4)
+
+        return zscores
+
+    # ── Etape 4 : Construire le vecteur de features ──────────────────────
+
+    async def _build_feature_vector(
+        self,
+        patient_id: str,
+        target_date: date,
+        zscores: dict[str, float],
+        db: AsyncSession,
+    ) -> dict[str, float]:
+        """
+        Construire le vecteur de features complet (Z-scores + tendances).
+
+        Inclut :
+            - Les Z-scores de chaque metrique
+            - trend_7d  : tendance du score sur 7 jours
+            - trend_14d : tendance du score sur 14 jours
+            - is_weekend : 1.0 si la date tombe un samedi ou dimanche
+
+        Args:
+            patient_id: Identifiant du patient.
+            target_date: Date cible.
+            zscores: Z-scores calcules a l'etape 3.
+            db: Session asynchrone SQLAlchemy.
+
+        Returns:
+            Dictionnaire representant le vecteur de features complet.
+        """
+        vector: dict[str, float] = dict(zscores)
+
+        # Calculer les tendances a partir des scores precedents
+        trend_7d = await self._compute_trend(patient_id, target_date, days=7, db=db)
+        trend_14d = await self._compute_trend(patient_id, target_date, days=14, db=db)
+
+        vector["trend_7d"] = round(trend_7d, 4)
+        vector["trend_14d"] = round(trend_14d, 4)
+
+        # Indicateur week-end (samedi=5, dimanche=6)
+        vector["is_weekend"] = 1.0 if target_date.weekday() >= 5 else 0.0
+
+        return vector
+
+    async def _compute_trend(
+        self,
+        patient_id: str,
+        target_date: date,
+        days: int,
+        db: AsyncSession,
+    ) -> float:
+        """
+        Calculer la tendance du score de risque sur les N derniers jours.
+
+        Utilise une regression lineaire simple (pente) sur les scores
+        precedents. Retourne 0.0 s'il n'y a pas assez de donnees.
+
+        Args:
+            patient_id: Identifiant du patient.
+            target_date: Date cible (exclue du calcul).
+            days: Nombre de jours de retrospective.
+            db: Session asynchrone SQLAlchemy.
+
+        Returns:
+            Pente de la tendance (positif = aggravation, negatif = amelioration).
+        """
+        start_date = target_date - timedelta(days=days)
+        stmt = (
+            select(RiskScore.date, RiskScore.score)
+            .where(
+                and_(
+                    RiskScore.patient_id == patient_id,
+                    RiskScore.date >= start_date,
+                    RiskScore.date < target_date,
+                )
+            )
+            .order_by(RiskScore.date)
+        )
+        result = await db.execute(stmt)
+        rows = result.all()
+
+        if len(rows) < 2:
+            return 0.0
+
+        # Regression lineaire simple : pente = cov(x,y) / var(x)
+        x = np.array([float(i) for i in range(len(rows))])
+        y = np.array([float(row.score) for row in rows])
+
+        x_mean = x.mean()
+        y_mean = y.mean()
+        variance = ((x - x_mean) ** 2).sum()
+
+        if variance < MIN_STD:
+            return 0.0
+
+        slope = ((x - x_mean) * (y - y_mean)).sum() / variance
+        return float(slope)
+
+    # ── Etape 5 : Prediction XGBoost (ou heuristique) ────────────────────
+
+    def _predict_score(self, feature_vector: dict[str, float]) -> tuple[float, float]:
+        """
+        Predire le score de risque a partir du vecteur de features.
+
+        Si un modele XGBoost est charge, il est utilise pour la prediction.
+        Sinon, un modele heuristique base sur la moyenne ponderee des
+        valeurs absolues des Z-scores est applique.
+
+        Args:
+            feature_vector: Vecteur de features complet.
+
+        Returns:
+            Tuple (score 0-100, confiance 0-1).
+        """
+        if not self._use_heuristic and self._model is not None:
+            return self._predict_xgboost(feature_vector)
+        else:
+            return self._predict_heuristic(feature_vector)
+
+    def _predict_xgboost(
+        self, feature_vector: dict[str, float]
+    ) -> tuple[float, float]:
+        """
+        Prediction via le modele XGBoost entraine.
+
+        Args:
+            feature_vector: Vecteur de features.
+
+        Returns:
+            Tuple (score, confiance).
+        """
+        # Construire le tableau numpy dans l'ordre attendu par le modele
+        feature_names = sorted(feature_vector.keys())
+        X = np.array([[feature_vector.get(f, 0.0) for f in feature_names]])
+
+        try:
+            prediction = self._model.predict(X)[0]
+            # Clipper le score entre 0 et 100
+            score = float(np.clip(prediction, 0.0, 100.0))
+            # La confiance est derivee de la coherence des features
+            confidence = self._estimate_confidence(feature_vector)
+            return round(score, 2), round(confidence, 3)
+        except Exception as exc:
+            logger.error(
+                "Erreur de prediction XGBoost : %s. Repli sur l'heuristique.",
+                exc,
+            )
+            return self._predict_heuristic(feature_vector)
+
+    def _predict_heuristic(
+        self, feature_vector: dict[str, float]
+    ) -> tuple[float, float]:
+        """
+        Modele heuristique de repli.
+
+        Calcule une moyenne ponderee des valeurs absolues des Z-scores,
+        puis mappe le resultat sur l'echelle 0-100 via une fonction sigmoide.
+
+        Poids :
+            sleep_duration = 0.20, sleep_quality = 0.15,
+            heart_rate = 0.15, hrv = 0.15, step_count = 0.10,
+            gps_radius = 0.10, screen_time = 0.10, call_frequency = 0.05
+
+        Args:
+            feature_vector: Vecteur de features.
+
+        Returns:
+            Tuple (score 0-100, confiance 0-1).
+        """
+        weighted_sum = 0.0
+        total_weight = 0.0
+
+        for z_name, weight in HEURISTIC_WEIGHTS.items():
+            z_value = feature_vector.get(z_name)
+            if z_value is not None:
+                weighted_sum += abs(z_value) * weight
+                total_weight += weight
+
+        if total_weight < MIN_STD:
+            logger.warning("Aucun Z-score disponible pour le calcul heuristique")
+            return 50.0, 0.0
+
+        # Normaliser par le poids total effectif
+        mean_abs_z = weighted_sum / total_weight
+
+        # Transformation sigmoide pour mapper sur 0-100
+        # Un Z moyen de 0 → ~27, de 2 → ~73, de 3 → ~88
+        score = 100.0 / (1.0 + math.exp(-1.2 * (mean_abs_z - 1.5)))
+        score = round(max(0.0, min(100.0, score)), 2)
+
+        # Integrer la tendance comme bonus/malus
+        trend_7d = feature_vector.get("trend_7d", 0.0)
+        trend_14d = feature_vector.get("trend_14d", 0.0)
+        trend_adjustment = (trend_7d * 0.7 + trend_14d * 0.3) * 2.0
+        score = round(max(0.0, min(100.0, score + trend_adjustment)), 2)
+
+        # La confiance depend du nombre de features disponibles
+        n_available = sum(
+            1 for z in HEURISTIC_WEIGHTS if feature_vector.get(z) is not None
+        )
+        confidence = round(n_available / len(HEURISTIC_WEIGHTS) * 0.85, 3)
+
+        return score, confidence
+
+    def _estimate_confidence(self, feature_vector: dict[str, float]) -> float:
+        """
+        Estimer la confiance de la prediction selon la completude des features.
+
+        Args:
+            feature_vector: Vecteur de features.
+
+        Returns:
+            Score de confiance entre 0.0 et 1.0.
+        """
+        total_features = len(HEURISTIC_WEIGHTS) + 3  # Z-scores + trend_7d, trend_14d, is_weekend
+        available = sum(1 for k in feature_vector if feature_vector[k] is not None)
+        return min(available / total_features, 1.0)
+
+    # ── Etape 6 : Explication SHAP ───────────────────────────────────────
+
+    def _compute_shap_values(
+        self, feature_vector: dict[str, float]
+    ) -> list[dict[str, Any]]:
+        """
+        Calculer les valeurs SHAP pour expliquer la prediction.
+
+        Si le modele XGBoost est charge et que le package shap est disponible,
+        utilise TreeExplainer. Sinon, approxime les valeurs SHAP en utilisant
+        la contribution ponderee de chaque feature dans le modele heuristique.
+
+        Args:
+            feature_vector: Vecteur de features.
+
+        Returns:
+            Liste de dictionnaires {feature, z_value, shap_value, message}.
+        """
+        # Essayer d'utiliser SHAP avec le modele XGBoost reel
+        if not self._use_heuristic and self._model is not None:
+            try:
+                import shap
+
+                feature_names = sorted(feature_vector.keys())
+                X = np.array([[feature_vector.get(f, 0.0) for f in feature_names]])
+                explainer = shap.TreeExplainer(self._model)
+                shap_values_array = explainer.shap_values(X)[0]
+
+                explanations = []
+                for i, fname in enumerate(feature_names):
+                    z_val = feature_vector.get(fname, 0.0)
+                    sv = float(shap_values_array[i])
+                    explanations.append({
+                        "feature": fname,
+                        "z_value": round(z_val, 4),
+                        "shap_value": round(sv, 4),
+                        "message": _generate_shap_message(fname, z_val),
+                    })
+
+                # Trier par importance absolue (les plus contributives en premier)
+                explanations.sort(key=lambda x: abs(x["shap_value"]), reverse=True)
+                return explanations
+
+            except ImportError:
+                logger.info(
+                    "Le package shap n'est pas installe. "
+                    "Utilisation de l'approximation heuristique."
+                )
+            except Exception as exc:
+                logger.error(
+                    "Erreur lors du calcul SHAP : %s. "
+                    "Utilisation de l'approximation heuristique.",
+                    exc,
+                )
+
+        # Approximation heuristique des valeurs SHAP
+        return self._approximate_shap_values(feature_vector)
+
+    def _approximate_shap_values(
+        self, feature_vector: dict[str, float]
+    ) -> list[dict[str, Any]]:
+        """
+        Approximation des valeurs SHAP pour le modele heuristique.
+
+        Chaque contribution est calculee comme : weight_i * |z_i| / total
+        avec le signe du Z-score pour indiquer la direction.
+
+        Args:
+            feature_vector: Vecteur de features.
+
+        Returns:
+            Liste triee par importance absolue decroissante.
+        """
+        explanations = []
+
+        for z_name, weight in HEURISTIC_WEIGHTS.items():
+            z_value = feature_vector.get(z_name)
+            if z_value is None:
+                continue
+
+            # Contribution approximee : poids * z_value
+            approx_shap = weight * z_value
+            explanations.append({
+                "feature": z_name,
+                "z_value": round(z_value, 4),
+                "shap_value": round(approx_shap, 4),
+                "message": _generate_shap_message(z_name, z_value),
+            })
+
+        # Ajouter les tendances si significatives
+        for trend_name in ("trend_7d", "trend_14d"):
+            trend_val = feature_vector.get(trend_name, 0.0)
+            if abs(trend_val) > 0.5:
+                explanations.append({
+                    "feature": trend_name,
+                    "z_value": round(trend_val, 4),
+                    "shap_value": round(trend_val * 0.1, 4),
+                    "message": (
+                        f"Tendance {'a la hausse' if trend_val > 0 else 'a la baisse'} "
+                        f"sur {'7' if '7' in trend_name else '14'} jours "
+                        f"({'+' if trend_val > 0 else ''}{trend_val:.1f} pts/jour)"
+                    ),
+                })
+
+        # Trier par importance absolue decroissante
+        explanations.sort(key=lambda x: abs(x["shap_value"]), reverse=True)
+        return explanations
+
+    # ── Etape 7-8 : Persister les resultats ──────────────────────────────
+
+    async def _persist_feature_vector(
+        self,
+        patient_id: str,
+        target_date: date,
+        zscores: dict[str, float],
+        feature_vector: dict[str, float],
+        db: AsyncSession,
+    ) -> str:
+        """
+        Persister le vecteur de features dans la base de donnees.
+
+        Args:
+            patient_id: Identifiant du patient.
+            target_date: Date cible.
+            zscores: Z-scores calcules.
+            feature_vector: Vecteur complet.
+            db: Session asynchrone.
+
+        Returns:
+            L'identifiant du vecteur de features cree.
+        """
+        fv_id = str(uuid4())
+        fv = FeatureVector(
+            id=fv_id,
+            patient_id=patient_id,
+            date=target_date,
+            z_heart_rate=zscores.get("z_heart_rate"),
+            z_hrv=zscores.get("z_hrv"),
+            z_sleep_duration=zscores.get("z_sleep_duration"),
+            z_sleep_quality=zscores.get("z_sleep_quality"),
+            z_step_count=zscores.get("z_step_count"),
+            z_gps_radius=zscores.get("z_gps_radius"),
+            z_screen_time=zscores.get("z_screen_time"),
+            z_call_frequency=zscores.get("z_call_frequency"),
+            trend_7d=feature_vector.get("trend_7d", 0.0),
+            trend_14d=feature_vector.get("trend_14d", 0.0),
+            is_weekend=feature_vector.get("is_weekend", 0.0),
+            vector_json=json.dumps(feature_vector),
+        )
+        db.add(fv)
+        await db.flush()
+
+        logger.debug(
+            "Vecteur de features persiste (id=%s) pour patient %s a la date %s",
+            fv_id,
+            patient_id,
+            target_date,
+        )
+        return fv_id
+
+    async def _persist_risk_score(
+        self,
+        patient_id: str,
+        target_date: date,
+        score: float,
+        alert_level: int,
+        feature_vector_id: str,
+        shap_values: list[dict[str, Any]],
+        confidence: float,
+        db: AsyncSession,
+    ) -> str:
+        """
+        Persister le score de risque dans la base de donnees.
+
+        Args:
+            patient_id: Identifiant du patient.
+            target_date: Date cible.
+            score: Score de risque (0-100).
+            alert_level: Niveau d'alerte (0-3).
+            feature_vector_id: Identifiant du vecteur de features associe.
+            shap_values: Valeurs SHAP en format JSON.
+            confidence: Niveau de confiance (0-1).
+            db: Session asynchrone.
+
+        Returns:
+            L'identifiant du score de risque cree.
+        """
+        score_id = str(uuid4())
+        risk_score = RiskScore(
+            id=score_id,
+            patient_id=patient_id,
+            date=target_date,
+            score=score,
+            alert_level=alert_level,
+            model_version=self._model_version,
+            feature_vector_id=feature_vector_id,
+            shap_values=shap_values,
+            confidence=confidence,
+        )
+        db.add(risk_score)
+        await db.flush()
+
+        logger.info(
+            "Score de risque persiste (id=%s) : patient=%s, score=%.2f, "
+            "alerte=%d, confiance=%.3f",
+            score_id,
+            patient_id,
+            score,
+            alert_level,
+            confidence,
+        )
+        return score_id
+
+    # ── Point d'entree principal ─────────────────────────────────────────
+
+    async def compute_score(
+        self,
+        patient_id: str,
+        target_date: date,
+        db: AsyncSession,
+    ) -> dict[str, Any]:
+        """
+        Calculer le score de risque complet pour un patient a une date donnee.
+
+        Execute le pipeline complet :
+            1. Recuperation des agregats quotidiens
+            2. Recuperation des baselines
+            3. Calcul des Z-scores
+            4. Construction du vecteur de features
+            5. Prediction du score
+            6. Calcul des explications SHAP
+            7. Determination du niveau d'alerte
+            8. Persistance des resultats
+
+        Args:
+            patient_id: Identifiant unique du patient.
+            target_date: Date pour laquelle calculer le score.
+            db: Session asynchrone SQLAlchemy.
+
+        Returns:
+            Dictionnaire contenant :
+                - score_id: Identifiant du score
+                - patient_id: Identifiant du patient
+                - date: Date du scoring
+                - score: Score de risque (0-100)
+                - alert_level: Niveau d'alerte (0-3)
+                - model_version: Version du modele utilise
+                - confidence: Confiance de la prediction (0-1)
+                - feature_vector_id: Identifiant du vecteur de features
+                - shap_explanations: Liste des explications SHAP
+                - top_features: Top 3 features contributives avec messages FR
+
+        Raises:
+            ValueError: Si aucune donnee n'est disponible pour le patient.
+        """
+        logger.info(
+            "Demarrage du pipeline de scoring pour patient=%s, date=%s",
+            patient_id,
+            target_date,
+        )
+
+        # Etape 1 : Recuperer les agregats quotidiens
+        aggregate = await self._fetch_daily_aggregates(patient_id, target_date, db)
+        if aggregate is None:
+            raise ValueError(
+                f"Aucune donnee disponible pour le patient {patient_id} "
+                f"a la date {target_date}. Le scoring ne peut pas etre effectue."
+            )
+
+        # Etape 2 : Recuperer les baselines
+        baselines = await self._fetch_baselines(patient_id, db)
+        if not baselines:
+            raise ValueError(
+                f"Aucune baseline disponible pour le patient {patient_id}. "
+                f"Le scoring necessite des donnees historiques."
+            )
+
+        # Etape 3 : Calculer les Z-scores
+        zscores = self._compute_zscores(aggregate, baselines)
+        if not zscores:
+            raise ValueError(
+                f"Impossible de calculer les Z-scores pour le patient {patient_id}. "
+                f"Verifier la correspondance entre agregats et baselines."
+            )
+
+        logger.debug("Z-scores calcules : %s", zscores)
+
+        # Etape 4 : Construire le vecteur de features
+        feature_vector = await self._build_feature_vector(
+            patient_id, target_date, zscores, db
+        )
+        logger.debug("Vecteur de features : %s", feature_vector)
+
+        # Etape 5 : Prediction du score
+        score, confidence = self._predict_score(feature_vector)
+
+        # Etape 6 : Explication SHAP
+        shap_explanations = self._compute_shap_values(feature_vector)
+
+        # Etape 7 : Determination du niveau d'alerte
+        alert_level = _determine_alert_level(score)
+
+        # Etape 8 : Persistance
+        feature_vector_id = await self._persist_feature_vector(
+            patient_id, target_date, zscores, feature_vector, db
+        )
+        score_id = await self._persist_risk_score(
+            patient_id,
+            target_date,
+            score,
+            alert_level,
+            feature_vector_id,
+            shap_explanations,
+            confidence,
+            db,
+        )
+
+        await db.commit()
+
+        # Etape 9 : Retourner le resultat
+        top_features = shap_explanations[:3]
+        result = {
+            "score_id": score_id,
+            "patient_id": patient_id,
+            "date": target_date.isoformat(),
+            "score": score,
+            "alert_level": alert_level,
+            "model_version": self._model_version,
+            "confidence": confidence,
+            "feature_vector_id": feature_vector_id,
+            "shap_explanations": shap_explanations,
+            "top_features": [
+                {"feature": f["feature"], "message": f["message"]}
+                for f in top_features
+            ],
+        }
+
+        logger.info(
+            "Pipeline termine pour patient=%s : score=%.2f, alerte=%d, "
+            "top_features=%s",
+            patient_id,
+            score,
+            alert_level,
+            [f["feature"] for f in top_features],
+        )
+
+        return result
+
+    # ── Explication a posteriori d'un score existant ─────────────────────
+
+    async def explain_score(
+        self,
+        score_id: str,
+        db: AsyncSession,
+    ) -> dict[str, Any]:
+        """
+        Obtenir l'explication detaillee d'un score de risque existant.
+
+        Recupere le score et son vecteur de features associe depuis la base,
+        puis regenere les explications SHAP avec des messages en francais.
+
+        Args:
+            score_id: Identifiant du score de risque.
+            db: Session asynchrone SQLAlchemy.
+
+        Returns:
+            Dictionnaire contenant :
+                - score_id: Identifiant du score
+                - patient_id: Identifiant du patient
+                - date: Date du scoring
+                - score: Score de risque
+                - alert_level: Niveau d'alerte
+                - shap_explanations: Liste complete des explications
+                - top_features: Top 3 features avec messages FR
+                - summary_fr: Resume en francais
+
+        Raises:
+            ValueError: Si le score_id est introuvable.
+        """
+        logger.info("Explication demandee pour score_id=%s", score_id)
+
+        # Recuperer le score existant
+        stmt = select(RiskScore).where(RiskScore.id == score_id)
+        result = await db.execute(stmt)
+        risk_score = result.scalar_one_or_none()
+
+        if risk_score is None:
+            raise ValueError(f"Score introuvable avec l'identifiant {score_id}")
+
+        # Si les valeurs SHAP sont deja stockees, les reutiliser
+        if risk_score.shap_values:
+            shap_explanations = risk_score.shap_values
+        else:
+            # Recalculer a partir du vecteur de features
+            fv_stmt = select(FeatureVector).where(
+                FeatureVector.id == risk_score.feature_vector_id
+            )
+            fv_result = await db.execute(fv_stmt)
+            feature_vector_obj = fv_result.scalar_one_or_none()
+
+            if feature_vector_obj is None:
+                raise ValueError(
+                    f"Vecteur de features introuvable pour le score {score_id}"
+                )
+
+            # Reconstruire le vecteur de features depuis le JSON
+            feature_vector = json.loads(feature_vector_obj.vector_json)
+            shap_explanations = self._compute_shap_values(feature_vector)
+
+        top_features = shap_explanations[:3] if shap_explanations else []
+
+        # Generer le resume en francais
+        summary_fr = self._generate_summary_fr(
+            risk_score.score, risk_score.alert_level, top_features
+        )
+
+        return {
+            "score_id": score_id,
+            "patient_id": risk_score.patient_id,
+            "date": risk_score.date.isoformat() if risk_score.date else None,
+            "score": risk_score.score,
+            "alert_level": risk_score.alert_level,
+            "model_version": risk_score.model_version,
+            "confidence": risk_score.confidence,
+            "shap_explanations": shap_explanations,
+            "top_features": [
+                {"feature": f["feature"], "message": f["message"]}
+                for f in top_features
+            ],
+            "summary_fr": summary_fr,
+        }
+
+    def _generate_summary_fr(
+        self,
+        score: float,
+        alert_level: int,
+        top_features: list[dict[str, Any]],
+    ) -> str:
+        """
+        Generer un resume en francais de l'analyse de risque.
+
+        Args:
+            score: Score de risque.
+            alert_level: Niveau d'alerte.
+            top_features: Top features contributives.
+
+        Returns:
+            Resume lisible en francais.
+        """
+        level_labels = {
+            0: "faible",
+            1: "modere",
+            2: "eleve",
+            3: "critique",
+        }
+        level_str = level_labels.get(alert_level, "inconnu")
+
+        summary = (
+            f"Score de risque : {score:.1f}/100 (niveau {level_str}). "
+        )
+
+        if top_features:
+            summary += "Principaux facteurs : "
+            messages = [f["message"] for f in top_features[:3]]
+            summary += " ; ".join(messages) + "."
+
+        return summary
+
+
+# ── Instance globale du pipeline ──────────────────────────────────────────────
+
+# Initialisation paresseuse pour permettre la configuration avant le chargement
+_pipeline_instance: Optional[ScoringPipeline] = None
+
+
+def get_pipeline(model_path: Optional[Path] = None) -> ScoringPipeline:
+    """
+    Obtenir l'instance globale du pipeline de scoring.
+
+    Cree l'instance au premier appel (initialisation paresseuse).
+
+    Args:
+        model_path: Chemin optionnel vers le modele XGBoost.
+
+    Returns:
+        Instance du ScoringPipeline.
+    """
+    global _pipeline_instance
+    if _pipeline_instance is None:
+        _pipeline_instance = ScoringPipeline(model_path=model_path)
+    return _pipeline_instance

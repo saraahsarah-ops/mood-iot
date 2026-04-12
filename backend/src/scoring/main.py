@@ -1,20 +1,27 @@
 """
 Mood-IoT : Service ML Scoring (port 8003).
-Calcul du score de risque, historique, explications SHAP.
+Calcul du score de risque via pipeline ML, historique, explications SHAP.
+Connecte a PostgreSQL via SQLAlchemy async.
 """
 
-from datetime import datetime, timezone
-from enum import Enum
+import logging
+from datetime import date, datetime, timezone
 from typing import Optional
-from uuid import uuid4
+from uuid import UUID
 
 from fastapi import FastAPI, Depends, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from sqlalchemy import select, and_
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.shared.config import settings
 from src.shared.auth import get_current_user, require_role
 from src.shared.database import get_db
+from src.shared.models import RiskScore, FeatureVector, Patient
+from src.scoring.pipeline import get_pipeline
+
+logger = logging.getLogger("mood_iot.scoring")
 
 # ---------------------------------------------------------------------------
 # Application
@@ -22,8 +29,8 @@ from src.shared.database import get_db
 
 app = FastAPI(
     title="Mood-IoT Scoring Service",
-    version="1.0.0",
-    description="Service de scoring ML pour l'evaluation du risque patient",
+    version="2.0.0",
+    description="Service de scoring ML — pipeline reel avec PostgreSQL",
 )
 
 app.add_middleware(
@@ -35,53 +42,49 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
-# Thresholds from config: 40 / 60 / 80
+# Seuils : 40 / 60 / 80
 # ---------------------------------------------------------------------------
 
 THRESHOLDS = settings.scoring_thresholds_tuple  # (40, 60, 80)
 
 
-class RiskLevel(str, Enum):
+class RiskLevel(str):
     low = "low"              # 0 - 39
     moderate = "moderate"    # 40 - 59
     high = "high"            # 60 - 79
     critical = "critical"    # 80 - 100
 
 
-def _classify_risk(score: float) -> RiskLevel:
+def _classify_risk(score: float) -> str:
     if score < THRESHOLDS[0]:
-        return RiskLevel.low
+        return "low"
     elif score < THRESHOLDS[1]:
-        return RiskLevel.moderate
+        return "moderate"
     elif score < THRESHOLDS[2]:
-        return RiskLevel.high
+        return "high"
     else:
-        return RiskLevel.critical
+        return "critical"
 
 
 # ---------------------------------------------------------------------------
-# Pydantic models
+# Modeles Pydantic
 # ---------------------------------------------------------------------------
 
 
 class ComputeScoreRequest(BaseModel):
-    phq9_total: Optional[int] = Field(None, ge=0, le=27)
-    sleep_hours: Optional[float] = Field(None, ge=0, le=24)
-    activity_minutes: Optional[int] = Field(None, ge=0)
-    heart_rate_avg: Optional[float] = None
-    hrv_avg: Optional[float] = None
-    social_interaction_score: Optional[float] = Field(None, ge=0, le=10)
+    target_date: Optional[date] = Field(None, description="Date cible (defaut: aujourd'hui)")
     force_recompute: bool = False
 
 
 class ScoreResponse(BaseModel):
     score_id: str
     patient_id: str
+    date: str
     score: float
     risk_level: str
-    confidence: float
+    alert_level: int
+    confidence: Optional[float]
     model_version: str
-    features_used: list[str]
     computed_at: str
 
 
@@ -96,6 +99,7 @@ class SHAPFeature(BaseModel):
     value: float
     shap_value: float
     direction: str  # "risk_increase" | "risk_decrease"
+    description_fr: str
 
 
 class SHAPExplanation(BaseModel):
@@ -105,19 +109,29 @@ class SHAPExplanation(BaseModel):
     risk_level: str
     base_value: float
     features: list[SHAPFeature]
+    summary_fr: str
     generated_at: str
 
 
 # ---------------------------------------------------------------------------
-# In-memory store (placeholder)
+# Startup
 # ---------------------------------------------------------------------------
 
-_scores_db: dict[str, dict] = {}           # score_id -> score
-_patient_scores: dict[str, list[str]] = {}  # patient_id -> [score_ids]
+
+@app.on_event("startup")
+async def on_startup():
+    logger.info("Service ML Scoring demarre sur le port 8003")
+    logger.info("Seuils d'alerte : %s", THRESHOLDS)
+
 
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "service": "scoring", "version": "2.0.0"}
 
 
 @app.post(
@@ -128,143 +142,231 @@ _patient_scores: dict[str, list[str]] = {}  # patient_id -> [score_ids]
 async def compute_score(
     patient_id: str,
     payload: ComputeScoreRequest,
+    db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """Calculer le score de risque pour un patient."""
-    # TODO: load real ML model from S3 (settings.MODEL_S3_BUCKET)
-    # Placeholder scoring logic using weighted average of available features
-    features_used: list[str] = []
-    raw_values: list[float] = []
+    """Calculer le score de risque pour un patient via le pipeline ML."""
 
-    if payload.phq9_total is not None:
-        features_used.append("phq9_total")
-        raw_values.append(payload.phq9_total / 27.0 * 100)  # Normalize to 0-100
+    target_date = payload.target_date or date.today()
+    pipeline = get_pipeline()
 
-    if payload.sleep_hours is not None:
-        features_used.append("sleep_hours")
-        # Poor sleep (<5h or >10h) increases risk
-        deviation = abs(payload.sleep_hours - 7.5) / 7.5
-        raw_values.append(min(deviation * 100, 100))
-
-    if payload.activity_minutes is not None:
-        features_used.append("activity_minutes")
-        # Less activity = more risk
-        raw_values.append(max(0, 100 - payload.activity_minutes / 60 * 100))
-
-    if payload.heart_rate_avg is not None:
-        features_used.append("heart_rate_avg")
-        deviation = abs(payload.heart_rate_avg - 70) / 70
-        raw_values.append(min(deviation * 100, 100))
-
-    if payload.hrv_avg is not None:
-        features_used.append("hrv_avg")
-        raw_values.append(max(0, 100 - payload.hrv_avg / 100 * 100))
-
-    if payload.social_interaction_score is not None:
-        features_used.append("social_interaction_score")
-        raw_values.append(max(0, 100 - payload.social_interaction_score * 10))
-
-    if not raw_values:
+    # Verifier que le patient existe
+    result = await db.execute(
+        select(Patient).where(Patient.id == patient_id)
+    )
+    patient = result.scalar_one_or_none()
+    if patient is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Au moins une feature est requise pour calculer le score",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Patient introuvable",
         )
 
-    score = round(sum(raw_values) / len(raw_values), 2)
-    score = max(0, min(100, score))
-    risk_level = _classify_risk(score)
+    # Verifier si un score existe deja pour cette date
+    if not payload.force_recompute:
+        existing = await db.execute(
+            select(RiskScore).where(
+                and_(
+                    RiskScore.patient_id == patient_id,
+                    RiskScore.date == target_date,
+                )
+            )
+        )
+        existing_score = existing.scalar_one_or_none()
+        if existing_score is not None:
+            return ScoreResponse(
+                score_id=str(existing_score.id),
+                patient_id=str(existing_score.patient_id),
+                date=str(existing_score.date),
+                score=existing_score.score,
+                risk_level=_classify_risk(existing_score.score),
+                alert_level=existing_score.alert_level,
+                confidence=existing_score.confidence,
+                model_version=existing_score.model_version,
+                computed_at=existing_score.created_at.isoformat(),
+            )
 
-    score_id = str(uuid4())
-    now = datetime.now(timezone.utc).isoformat()
+    # Executer le pipeline ML complet
+    try:
+        result = await pipeline.compute_score(patient_id, target_date, db)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        )
 
-    score_record = {
-        "score_id": score_id,
-        "patient_id": patient_id,
-        "score": score,
-        "risk_level": risk_level.value,
-        "confidence": round(0.6 + len(raw_values) * 0.05, 2),  # Placeholder
-        "model_version": "placeholder-v0.1.0",
-        "features_used": features_used,
-        "computed_at": now,
-    }
+    # Declencher l'escalade si alert_level >= 1
+    if result.get("alert_level", 0) >= 1:
+        try:
+            from src.notification.escalation import EscalationEngine
+            engine = EscalationEngine()
+            await engine.process_alert(
+                patient_id=patient_id,
+                score=result["score"],
+                alert_level=result["alert_level"],
+                risk_score_id=str(result["risk_score_id"]),
+                shap_explanations=result.get("shap_explanations", []),
+                db=db,
+            )
+            logger.info(
+                "Escalade declenchee pour patient %s (niveau %d, score %.1f)",
+                patient_id, result["alert_level"], result["score"],
+            )
+        except Exception:
+            logger.exception("Erreur lors de l'escalade pour patient %s", patient_id)
 
-    _scores_db[score_id] = score_record
-    _patient_scores.setdefault(patient_id, []).append(score_id)
-
-    # TODO: persist to PostgreSQL, trigger notification if risk >= moderate
-    return ScoreResponse(**score_record)
+    return ScoreResponse(
+        score_id=str(result["risk_score_id"]),
+        patient_id=patient_id,
+        date=str(target_date),
+        score=result["score"],
+        risk_level=_classify_risk(result["score"]),
+        alert_level=result["alert_level"],
+        confidence=result.get("confidence"),
+        model_version=result.get("model_version", "heuristic-v1"),
+        computed_at=datetime.now(timezone.utc).isoformat(),
+    )
 
 
 @app.get("/scoring/latest/{patient_id}", response_model=ScoreResponse)
 async def get_latest_score(
     patient_id: str,
+    db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """Recuperer le dernier score d'un patient."""
-    score_ids = _patient_scores.get(patient_id, [])
-    if not score_ids:
+    result = await db.execute(
+        select(RiskScore)
+        .where(RiskScore.patient_id == patient_id)
+        .order_by(RiskScore.created_at.desc())
+        .limit(1)
+    )
+    score = result.scalar_one_or_none()
+
+    if score is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Aucun score trouve pour ce patient",
         )
 
-    latest = _scores_db[score_ids[-1]]
-    return ScoreResponse(**latest)
+    return ScoreResponse(
+        score_id=str(score.id),
+        patient_id=str(score.patient_id),
+        date=str(score.date),
+        score=score.score,
+        risk_level=_classify_risk(score.score),
+        alert_level=score.alert_level,
+        confidence=score.confidence,
+        model_version=score.model_version,
+        computed_at=score.created_at.isoformat(),
+    )
 
 
 @app.get("/scoring/history/{patient_id}", response_model=ScoreHistoryResponse)
 async def get_score_history(
     patient_id: str,
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
     limit: int = Query(50, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """Recuperer l'historique des scores d'un patient."""
-    score_ids = _patient_scores.get(patient_id, [])
-    scores = [ScoreResponse(**_scores_db[sid]) for sid in score_ids[-limit:]]
+    query = select(RiskScore).where(RiskScore.patient_id == patient_id)
+
+    if from_date:
+        query = query.where(RiskScore.date >= from_date)
+    if to_date:
+        query = query.where(RiskScore.date <= to_date)
+
+    query = query.order_by(RiskScore.date.desc()).limit(limit)
+    result = await db.execute(query)
+    rows = result.scalars().all()
+
+    # Compter le total sans limit
+    count_query = select(RiskScore.id).where(RiskScore.patient_id == patient_id)
+    if from_date:
+        count_query = count_query.where(RiskScore.date >= from_date)
+    if to_date:
+        count_query = count_query.where(RiskScore.date <= to_date)
+    count_result = await db.execute(count_query)
+    total = len(count_result.all())
+
+    scores = [
+        ScoreResponse(
+            score_id=str(s.id),
+            patient_id=str(s.patient_id),
+            date=str(s.date),
+            score=s.score,
+            risk_level=_classify_risk(s.score),
+            alert_level=s.alert_level,
+            confidence=s.confidence,
+            model_version=s.model_version,
+            computed_at=s.created_at.isoformat(),
+        )
+        for s in rows
+    ]
 
     return ScoreHistoryResponse(
         patient_id=patient_id,
         scores=scores,
-        total=len(score_ids),
+        total=total,
     )
 
 
 @app.get("/scoring/explain/{score_id}", response_model=SHAPExplanation)
 async def explain_score(
     score_id: str,
+    db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """Obtenir l'explication SHAP d'un score."""
-    score_record = _scores_db.get(score_id)
-    if score_record is None:
+    pipeline = get_pipeline()
+
+    try:
+        explanation = await pipeline.explain_score(score_id, db)
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Score introuvable",
+            detail=str(e),
         )
 
-    # TODO: compute real SHAP values from stored model + features
-    # Placeholder explanation
-    features_explanation = []
-    for i, feat in enumerate(score_record["features_used"]):
-        shap_val = round((-1) ** i * (5.0 + i * 2.3), 2)  # Fake SHAP values
-        features_explanation.append(
+    features = []
+    for feat in explanation.get("features", []):
+        features.append(
             SHAPFeature(
-                feature=feat,
-                value=0.0,  # TODO: store actual feature values
-                shap_value=shap_val,
-                direction="risk_increase" if shap_val > 0 else "risk_decrease",
+                feature=feat["feature"],
+                value=feat.get("value", 0.0),
+                shap_value=feat.get("shap_value", 0.0),
+                direction="risk_increase" if feat.get("shap_value", 0) > 0 else "risk_decrease",
+                description_fr=feat.get("description_fr", ""),
             )
         )
 
     return SHAPExplanation(
         score_id=score_id,
-        patient_id=score_record["patient_id"],
-        score=score_record["score"],
-        risk_level=score_record["risk_level"],
-        base_value=50.0,  # TODO: real SHAP base value
-        features=features_explanation,
+        patient_id=str(explanation["patient_id"]),
+        score=explanation["score"],
+        risk_level=_classify_risk(explanation["score"]),
+        base_value=explanation.get("base_value", 50.0),
+        features=features,
+        summary_fr=explanation.get("summary_fr", ""),
         generated_at=datetime.now(timezone.utc).isoformat(),
     )
+
+
+@app.post("/scoring/baseline/{patient_id}")
+async def trigger_baseline(
+    patient_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_role("psychiatre")),
+):
+    """Declencher le recalcul des baselines pour un patient (TODO: implementation complete)."""
+    # TODO Phase 3 : recalcul des baselines a partir des 14 derniers jours
+    return {
+        "status": "accepted",
+        "patient_id": patient_id,
+        "message": "Recalcul des baselines programme (TODO)",
+    }
 
 
 # ---------------------------------------------------------------------------
