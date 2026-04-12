@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useNotifStore } from "@/lib/store";
+import { useAuthStore } from "@/lib/auth";
 
 const NAV_ITEMS = [
   { href: "/", label: "Vue generale", emoji: "🏠" },
@@ -12,7 +13,14 @@ const NAV_ITEMS = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const unread = useNotifStore((s) => s.unreadCount());
+  const { user, logout } = useAuthStore();
+
+  const handleLogout = () => {
+    logout();
+    router.push("/login");
+  };
 
   return (
     <aside className="flex h-screen w-64 flex-col bg-gradient-to-b from-primary-dark to-primary text-white">
@@ -51,10 +59,18 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* Footer */}
+      {/* Footer user + logout */}
       <div className="border-t border-white/20 px-6 py-4">
-        <p className="text-xs text-blue-200">Dr. Martin</p>
-        <p className="text-xs text-blue-300">Psychiatre</p>
+        <p className="text-sm font-medium text-white">
+          {user?.first_name ? `Dr. ${user.last_name || user.first_name}` : "Dr. Martin"}
+        </p>
+        <p className="text-xs text-blue-200">{user?.role || "Psychiatre"}</p>
+        <button
+          onClick={handleLogout}
+          className="mt-2 flex items-center gap-2 text-xs text-blue-300 hover:text-white transition"
+        >
+          🚪 Deconnexion
+        </button>
       </div>
     </aside>
   );
