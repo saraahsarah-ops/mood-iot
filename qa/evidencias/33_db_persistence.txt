@@ -1,8 +1,0 @@
- total |        tabla         
--------+----------------------
-     3 | mood_entries
-     3 | daily_aggregates
-     3 | teleconsult_sessions
-    12 | consents
-(4 rows)
-

@@ -1,5 +1,0 @@
-{
-    "secret": "MSXWINI7VZEE2H7NZ6FP5R7XOMTT2V2C",
-    "qr_code_url": "otpauth://totp/Mood-IoT:dr.martin%40mood-iot.fr?secret=MSXWINI7VZEE2H7NZ6FP5R7XOMTT2V2C&issuer=Mood-IoT",
-    "message": "Scannez le QR code avec votre application d'authentification"
-}

@@ -55,3 +55,9 @@ htmlcov/
 *.pem
 *.key
 credentials.json
+
+# QA evidences & reports (stored in Google Drive, not in repo)
+qa/evidencias/
+qa/*.xlsx
+qa/*.docx
+qa/~$*
