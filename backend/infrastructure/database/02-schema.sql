@@ -141,6 +141,8 @@ CREATE TABLE daily_aggregates (
     screen_time_min         FLOAT,
     call_count              INT,
     call_duration_min       FLOAT,
+    source_platform         VARCHAR(30),            -- 'android_health_connect' | 'ios_healthkit'
+    synced_at               TIMESTAMPTZ,            -- quand l'appli mobile a envoye ces donnees
     created_at              TIMESTAMPTZ DEFAULT now(),
     UNIQUE (patient_id, date)
 );

@@ -31,10 +31,6 @@ class Settings(BaseSettings):
     AWS_REGION: str = "eu-west-3"
     AWS_ENDPOINT_URL: str | None = None
 
-    # ── MQTT ────────────────────────────────────────────────────────────────
-    MQTT_BROKER_URL: str = "mqtt://localhost:1883"
-    MQTT_TOPIC_PREFIX: str = "mood-iot"
-
     # ── ML Scoring ──────────────────────────────────────────────────────────
     SCORING_THRESHOLDS: str = "40/60/80"
     MODEL_S3_BUCKET: str = "mood-iot-models"

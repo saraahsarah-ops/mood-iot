@@ -40,7 +40,7 @@
     {
       "name": "Docker Compose (infra)",
       "runtimeExecutable": "docker",
-      "runtimeArgs": ["compose", "up", "-d", "postgres", "redis", "mosquitto", "localstack"],
+      "runtimeArgs": ["compose", "up", "-d", "postgres", "redis", "localstack"],
       "port": 5432
     }
   ]

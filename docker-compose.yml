@@ -212,19 +212,6 @@ services:
     networks:
       - mood-iot-network
 
-  # ── MQTT Broker (dev — remplace IoT Core en prod) ────────────────────────
-  mosquitto:
-    image: eclipse-mosquitto:2
-    container_name: mood-iot-mosquitto
-    restart: unless-stopped
-    ports:
-      - "1883:1883"
-      - "9001:9001"
-    volumes:
-      - ./backend/infrastructure/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
-    networks:
-      - mood-iot-network
-
   # ── LocalStack (émule AWS en dev) ────────────────────────────────────────
   localstack:
     image: localstack/localstack:3
