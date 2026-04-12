@@ -180,6 +180,17 @@ _consents_db: dict[str, dict] = {}
 _baseline_db: dict[str, dict] = {}
 
 # ---------------------------------------------------------------------------
+# Health check (avant les routes protegees)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/patients/health")
+@app.get("/health")
+async def health():
+    return {"status": "healthy", "service": "patient"}
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -536,16 +547,6 @@ async def sync_health_data_batch(
         synced_at=datetime.now(timezone.utc).isoformat(),
         results=results,
     )
-
-
-# ---------------------------------------------------------------------------
-# Health check
-# ---------------------------------------------------------------------------
-
-
-@app.get("/patients/health")
-async def health():
-    return {"status": "healthy", "service": "patient"}
 
 
 # ---------------------------------------------------------------------------

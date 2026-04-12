@@ -132,9 +132,18 @@ async def health_check():
     """Verification de sante de la gateway et des services en aval."""
     service_status = {}
     client = await get_client()
+    # Health paths per service
+    health_paths = {
+        "auth": "/auth/health",
+        "patient": "/health",
+        "scoring": "/scoring/health",
+        "notification": "/health",
+        "teleconsult": "/teleconsult/health",
+    }
     for name, url in SERVICE_URLS.items():
         try:
-            r = await client.get(f"{url}/{name}/health", timeout=3.0)
+            path = health_paths.get(name, "/health")
+            r = await client.get(f"{url}{path}", timeout=3.0)
             service_status[name] = "healthy" if r.status_code == 200 else f"unhealthy ({r.status_code})"
         except Exception:
             service_status[name] = "unreachable"
