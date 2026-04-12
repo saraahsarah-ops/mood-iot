@@ -16,6 +16,9 @@ from sqlalchemy import select, and_, func, Date, cast
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+import httpx
+import logging
+
 from src.shared.config import settings
 from src.shared.auth import get_current_user, require_role
 from src.shared.database import get_db
@@ -29,6 +32,10 @@ from src.shared.models import (
     DailyAggregate,
     User,
 )
+
+logger = logging.getLogger("mood_iot.patient")
+
+SCORING_SERVICE_URL = "http://scoring:8003"
 
 # ---------------------------------------------------------------------------
 # Application
@@ -613,6 +620,24 @@ async def update_consents(
 VALID_PLATFORMS = ("android_health_connect", "ios_healthkit")
 
 
+async def _trigger_scoring(patient_id: str, target_date: str):
+    """Fire-and-forget: appeler le service scoring apres sync des donnees."""
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{SCORING_SERVICE_URL}/scoring/internal/compute/{patient_id}",
+                json={"target_date": target_date, "force_recompute": True},
+            )
+            if resp.status_code in (200, 201):
+                logger.info("Scoring triggered for patient %s date %s: score=%s",
+                            patient_id, target_date, resp.json().get("score"))
+            else:
+                logger.warning("Scoring returned %d for patient %s: %s",
+                               resp.status_code, patient_id, resp.text[:200])
+    except Exception as e:
+        logger.warning("Could not trigger scoring for %s: %s", patient_id, e)
+
+
 async def _sync_one_entry(
     patient_id: str, payload: HealthDataSync, db: AsyncSession
 ) -> HealthDataSyncResponse:
@@ -721,7 +746,10 @@ async def sync_health_data(
             detail=f"source_platform doit etre l'un de : {VALID_PLATFORMS}",
         )
 
-    return await _sync_one_entry(patient_id, payload, db)
+    result = await _sync_one_entry(patient_id, payload, db)
+    await db.commit()
+    await _trigger_scoring(patient_id, payload.date)
+    return result
 
 
 @app.post(
@@ -764,6 +792,13 @@ async def sync_health_data_batch(
                 detail=f"source_platform invalide pour la date {entry.date}",
             )
         results.append(await _sync_one_entry(patient_id, entry, db))
+
+    await db.commit()
+
+    # Trigger scoring for the most recent date in the batch
+    if results:
+        latest_date = max(entry.date for entry in payload)
+        await _trigger_scoring(patient_id, latest_date)
 
     return HealthDataBatchResponse(
         patient_id=patient_id,

@@ -18,8 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.shared.config import settings
 from src.shared.auth import get_current_user, require_role
 from src.shared.database import get_db
-from src.shared.models import RiskScore, FeatureVector, Patient
-from src.scoring.pipeline import get_pipeline
+from src.shared.models import RiskScore, FeatureVector, Patient, Baseline, DailyAggregate
+from src.scoring.pipeline import get_pipeline, METRIC_MAPPING
 
 logger = logging.getLogger("mood_iot.scoring")
 
@@ -228,6 +228,46 @@ async def compute_score(
     )
 
 
+@app.post("/scoring/internal/compute/{patient_id}")
+async def internal_compute_score(
+    patient_id: str,
+    payload: ComputeScoreRequest,
+    db: AsyncSession = Depends(get_db),
+    x_internal_service: str = "",
+):
+    """Endpoint interne (sans auth) pour les appels inter-services."""
+    target_date = payload.target_date or date.today()
+    pipeline = get_pipeline()
+
+    result_check = await db.execute(
+        select(Patient).where(Patient.id == patient_id)
+    )
+    if result_check.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Patient introuvable")
+
+    # Check baselines exist, auto-compute if missing
+    baseline_check = await db.execute(
+        select(Baseline).where(Baseline.patient_id == patient_id)
+    )
+    if not baseline_check.scalars().first():
+        logger.info("Auto-computing baselines for patient %s", patient_id)
+        from src.scoring.main import _compute_and_store_baselines
+        await _compute_and_store_baselines(patient_id, db)
+
+    try:
+        result = await pipeline.compute_score(patient_id, target_date, db)
+    except ValueError as e:
+        logger.warning("Scoring failed for %s: %s", patient_id, e)
+        return {"status": "skipped", "reason": str(e)}
+
+    return {
+        "status": "scored",
+        "patient_id": patient_id,
+        "score": result["score"],
+        "alert_level": result["alert_level"],
+    }
+
+
 @app.get("/scoring/latest/{patient_id}", response_model=ScoreResponse)
 async def get_latest_score(
     patient_id: str,
@@ -361,12 +401,107 @@ async def trigger_baseline(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_role("psychiatre")),
 ):
-    """Declencher le recalcul des baselines pour un patient (TODO: implementation complete)."""
-    # TODO Phase 3 : recalcul des baselines a partir des 14 derniers jours
+    """Recalculer les baselines pour un patient a partir de ses daily_aggregates."""
+    return await _compute_and_store_baselines(patient_id, db)
+
+
+async def _compute_and_store_baselines(patient_id: str, db: AsyncSession) -> dict:
+    """Calcule mean/std de chaque metrique sur les daily_aggregates disponibles."""
+    from sqlalchemy import func as sqla_func
+
+    metrics_cols = {
+        "heart_rate_avg": DailyAggregate.heart_rate_avg,
+        "heart_rate_variability": DailyAggregate.heart_rate_variability,
+        "sleep_duration_min": DailyAggregate.sleep_duration_min,
+        "sleep_quality_score": DailyAggregate.sleep_quality_score,
+        "step_count": DailyAggregate.step_count,
+        "gps_radius_km": DailyAggregate.gps_radius_km,
+        "screen_time_min": DailyAggregate.screen_time_min,
+        "call_count": DailyAggregate.call_count,
+    }
+
+    # Get date range
+    range_stmt = select(
+        sqla_func.min(DailyAggregate.date),
+        sqla_func.max(DailyAggregate.date),
+        sqla_func.count(DailyAggregate.id),
+    ).where(DailyAggregate.patient_id == patient_id)
+    range_result = await db.execute(range_stmt)
+    row = range_result.one()
+    window_start, window_end, sample_count = row[0], row[1], row[2]
+
+    if not sample_count or sample_count < 3:
+        return {
+            "status": "insufficient_data",
+            "patient_id": patient_id,
+            "sample_count": sample_count or 0,
+            "message": "Au moins 3 jours de donnees sont necessaires",
+        }
+
+    computed = []
+    for metric_name, col in metrics_cols.items():
+        stmt = select(
+            sqla_func.avg(col),
+            sqla_func.stddev_pop(col),
+            sqla_func.min(col),
+            sqla_func.max(col),
+        ).where(
+            and_(
+                DailyAggregate.patient_id == patient_id,
+                col.isnot(None),
+            )
+        )
+        result = await db.execute(stmt)
+        stats = result.one()
+        mean_val, std_val, min_val, max_val = stats[0], stats[1], stats[2], stats[3]
+
+        if mean_val is None:
+            continue
+
+        std_val = max(float(std_val or 0), 1e-6)
+
+        # UPSERT baseline
+        existing = await db.execute(
+            select(Baseline).where(
+                and_(
+                    Baseline.patient_id == patient_id,
+                    Baseline.metric_name == metric_name,
+                )
+            )
+        )
+        baseline = existing.scalars().first()
+        if baseline:
+            baseline.mean_value = float(mean_val)
+            baseline.std_value = std_val
+            baseline.min_value = float(min_val) if min_val else None
+            baseline.max_value = float(max_val) if max_val else None
+            baseline.sample_count = sample_count
+            baseline.window_start = window_start
+            baseline.window_end = window_end
+        else:
+            baseline = Baseline(
+                patient_id=patient_id,
+                metric_name=metric_name,
+                mean_value=float(mean_val),
+                std_value=std_val,
+                min_value=float(min_val) if min_val else None,
+                max_value=float(max_val) if max_val else None,
+                sample_count=sample_count,
+                window_start=window_start,
+                window_end=window_end,
+            )
+            db.add(baseline)
+
+        computed.append(metric_name)
+
+    await db.commit()
+
     return {
-        "status": "accepted",
+        "status": "completed",
         "patient_id": patient_id,
-        "message": "Recalcul des baselines programme (TODO)",
+        "metrics_computed": computed,
+        "sample_count": sample_count,
+        "window": f"{window_start} -> {window_end}",
     }
 
 
