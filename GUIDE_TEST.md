@@ -4,7 +4,7 @@
 
 - Docker Desktop installe et lance
 - Git Bash ou terminal compatible
-- Ports libres : 4566, 5432, 6379, 8000-8005
+- Ports libres : 4566, 5433, 6380, 8010-8015
 
 ---
 
@@ -59,14 +59,14 @@ SELECT * FROM model_versions;
 
 ```bash
 # Gateway
-curl http://localhost:8000/api/v1/health
+curl http://localhost:8010/api/v1/health
 
 # Services individuels
-curl http://localhost:8001/auth/health
-curl http://localhost:8002/patients/health
-curl http://localhost:8003/scoring/health
-curl http://localhost:8004/notifications/health
-curl http://localhost:8005/teleconsult/health
+curl http://localhost:8011/auth/health
+curl http://localhost:8012/patients/health
+curl http://localhost:8013/scoring/health
+curl http://localhost:8014/notifications/health
+curl http://localhost:8015/teleconsult/health
 ```
 
 **Resultat attendu :** Chaque endpoint retourne `{"status": "healthy", "service": "..."}`.
@@ -79,7 +79,7 @@ curl http://localhost:8005/teleconsult/health
 
 ```bash
 # Login du Dr. Martin (mot de passe : MoodIoT2026!)
-curl -X POST http://localhost:8001/auth/login \
+curl -X POST http://localhost:8011/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email": "dr.martin@mood-iot.fr", "password": "MoodIoT2026!"}'
 ```
@@ -91,7 +91,7 @@ curl -X POST http://localhost:8001/auth/login \
 ### 4.2 Login d'une patiente
 
 ```bash
-curl -X POST http://localhost:8001/auth/login \
+curl -X POST http://localhost:8011/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email": "sophie.dupont@email.fr", "password": "MoodIoT2026!"}'
 ```
@@ -103,7 +103,7 @@ curl -X POST http://localhost:8001/auth/login \
 ### 4.3 Enregistrement d'un nouvel utilisateur
 
 ```bash
-curl -X POST http://localhost:8001/auth/register \
+curl -X POST http://localhost:8011/auth/register \
   -H "Content-Type: application/json" \
   -d '{
     "email": "test@mood-iot.fr",
@@ -120,11 +120,11 @@ curl -X POST http://localhost:8001/auth/register \
 
 ```bash
 # Avec token valide
-curl http://localhost:8001/auth/me \
+curl http://localhost:8011/auth/me \
   -H "Authorization: Bearer $TOKEN_DOC"
 
 # Sans token (doit echouer)
-curl http://localhost:8001/auth/me
+curl http://localhost:8011/auth/me
 ```
 
 **Resultat attendu :** 200 avec info user / 403 sans token.
@@ -132,7 +132,7 @@ curl http://localhost:8001/auth/me
 ### 4.5 Refresh token
 
 ```bash
-curl -X POST http://localhost:8001/auth/refresh \
+curl -X POST http://localhost:8011/auth/refresh \
   -H "Content-Type: application/json" \
   -d '{"refresh_token": "COLLER_LE_REFRESH_TOKEN_ICI"}'
 ```
@@ -144,7 +144,7 @@ curl -X POST http://localhost:8001/auth/refresh \
 ### 5.1 Lister les patients (psychiatre uniquement)
 
 ```bash
-curl http://localhost:8002/patients \
+curl http://localhost:8012/patients \
   -H "Authorization: Bearer $TOKEN_DOC"
 ```
 
@@ -155,7 +155,7 @@ curl http://localhost:8002/patients \
 ### 5.2 Creer un patient
 
 ```bash
-curl -X POST http://localhost:8002/patients \
+curl -X POST http://localhost:8012/patients \
   -H "Authorization: Bearer $TOKEN_DOC" \
   -H "Content-Type: application/json" \
   -d '{
@@ -169,7 +169,7 @@ curl -X POST http://localhost:8002/patients \
 ### 5.3 Soumettre une entree d'humeur (PHQ-9)
 
 ```bash
-curl -X POST http://localhost:8002/patients/{PATIENT_ID}/mood \
+curl -X POST http://localhost:8012/patients/{PATIENT_ID}/mood \
   -H "Authorization: Bearer $TOKEN_DOC" \
   -H "Content-Type: application/json" \
   -d '{
@@ -184,7 +184,7 @@ curl -X POST http://localhost:8002/patients/{PATIENT_ID}/mood \
 ### 5.4 Sync Health Data (Health Connect)
 
 ```bash
-curl -X POST http://localhost:8002/patients/{PATIENT_ID}/health-data \
+curl -X POST http://localhost:8012/patients/{PATIENT_ID}/health-data \
   -H "Authorization: Bearer $TOKEN_SOPHIE" \
   -H "Content-Type: application/json" \
   -d '{
@@ -201,7 +201,7 @@ curl -X POST http://localhost:8002/patients/{PATIENT_ID}/health-data \
 ### 5.5 Batch Health Data Sync
 
 ```bash
-curl -X POST http://localhost:8002/patients/{PATIENT_ID}/health-data/batch \
+curl -X POST http://localhost:8012/patients/{PATIENT_ID}/health-data/batch \
   -H "Authorization: Bearer $TOKEN_SOPHIE" \
   -H "Content-Type: application/json" \
   -d '[
@@ -218,7 +218,7 @@ Le gateway proxifie toutes les requetes vers les microservices.
 
 ```bash
 # Via gateway au lieu d'acceder au service directement
-curl -X POST http://localhost:8000/api/v1/auth/login \
+curl -X POST http://localhost:8010/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email": "dr.martin@mood-iot.fr", "password": "MoodIoT2026!"}'
 ```
@@ -232,7 +232,7 @@ curl -X POST http://localhost:8000/api/v1/auth/login \
 ### 7.1 Calculer un score
 
 ```bash
-curl -X POST http://localhost:8003/scoring/compute/{PATIENT_UUID} \
+curl -X POST http://localhost:8013/scoring/compute/{PATIENT_UUID} \
   -H "Authorization: Bearer $TOKEN_DOC"
 ```
 
@@ -241,7 +241,7 @@ curl -X POST http://localhost:8003/scoring/compute/{PATIENT_UUID} \
 ### 7.2 Historique des scores
 
 ```bash
-curl "http://localhost:8003/scoring/history/{PATIENT_UUID}?from_date=2026-04-01&to_date=2026-04-12" \
+curl "http://localhost:8013/scoring/history/{PATIENT_UUID}?from_date=2026-04-01&to_date=2026-04-12" \
   -H "Authorization: Bearer $TOKEN_DOC"
 ```
 
@@ -252,7 +252,7 @@ curl "http://localhost:8003/scoring/history/{PATIENT_UUID}?from_date=2026-04-01&
 ### 8.1 Envoyer une notification
 
 ```bash
-curl -X POST http://localhost:8004/notifications/send \
+curl -X POST http://localhost:8014/notifications/send \
   -H "Authorization: Bearer $TOKEN_DOC" \
   -H "Content-Type: application/json" \
   -d '{
@@ -279,7 +279,7 @@ wscat -c ws://localhost:8004/notifications/ws/USER_UUID
 ### 9.1 Creer une session
 
 ```bash
-curl -X POST http://localhost:8005/teleconsult/sessions \
+curl -X POST http://localhost:8015/teleconsult/sessions \
   -H "Authorization: Bearer $TOKEN_DOC" \
   -H "Content-Type: application/json" \
   -d '{
@@ -294,7 +294,7 @@ curl -X POST http://localhost:8005/teleconsult/sessions \
 ### 9.2 Rejoindre une session
 
 ```bash
-curl -X POST http://localhost:8005/teleconsult/sessions/{SESSION_ID}/join \
+curl -X POST http://localhost:8015/teleconsult/sessions/{SESSION_ID}/join \
   -H "Authorization: Bearer $TOKEN_DOC"
 ```
 
@@ -373,15 +373,16 @@ docker compose config --quiet && echo "docker-compose.yml OK"
 set -e
 
 BASE="http://localhost"
+# Puertos remapeados: gateway=8010, auth=8011, patient=8012, scoring=8013, notif=8014, teleconsult=8015
 echo "=== Mood-IoT Smoke Test ==="
 
 echo "[1/6] Health checks..."
-curl -sf $BASE:8000/api/v1/health | python -m json.tool
-curl -sf $BASE:8001/auth/health > /dev/null && echo "  Auth: OK"
-curl -sf $BASE:8002/patients/health > /dev/null && echo "  Patient: OK"
-curl -sf $BASE:8003/scoring/health > /dev/null && echo "  Scoring: OK"
-curl -sf $BASE:8004/notifications/health > /dev/null && echo "  Notification: OK"
-curl -sf $BASE:8005/teleconsult/health > /dev/null && echo "  Teleconsult: OK"
+curl -sf $BASE:8010/api/v1/health | python -m json.tool
+curl -sf $BASE:8011/auth/health > /dev/null && echo "  Auth: OK"
+curl -sf $BASE:8012/patients/health > /dev/null && echo "  Patient: OK"
+curl -sf $BASE:8013/scoring/health > /dev/null && echo "  Scoring: OK"
+curl -sf $BASE:8014/notifications/health > /dev/null && echo "  Notification: OK"
+curl -sf $BASE:8015/teleconsult/health > /dev/null && echo "  Teleconsult: OK"
 
 echo ""
 echo "[2/6] Login psychiatre..."
@@ -401,7 +402,7 @@ echo "  Token Sophie: ${TOKEN_S:0:20}..."
 
 echo ""
 echo "[4/6] /auth/me..."
-curl -sf $BASE:8001/auth/me -H "Authorization: Bearer $TOKEN" | python -m json.tool
+curl -sf $BASE:8011/auth/me -H "Authorization: Bearer $TOKEN" | python -m json.tool
 
 echo ""
 echo "[5/6] Gateway proxy test..."

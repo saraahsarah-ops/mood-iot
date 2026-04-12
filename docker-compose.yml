@@ -15,7 +15,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mood_secret_2026}
       POSTGRES_DB: ${POSTGRES_DB:-mood_iot}
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./backend/infrastructure/database/01-extensions.sql:/docker-entrypoint-initdb.d/01-extensions.sql
@@ -36,7 +36,7 @@ services:
     container_name: mood-iot-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "6380:6379"
     networks:
       - mood-iot-network
     healthcheck:
@@ -55,7 +55,7 @@ services:
     container_name: mood-iot-gateway
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8010:8000"
     environment:
       - SERVICE_NAME=gateway
       - SERVICE_PORT=8000
@@ -64,8 +64,6 @@ services:
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
       - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
       - ENVIRONMENT=docker
-    volumes:
-      - ./backend/src:/app/src
     depends_on:
       postgres:
         condition: service_healthy
@@ -84,7 +82,7 @@ services:
     container_name: mood-iot-auth
     restart: unless-stopped
     ports:
-      - "8001:8001"
+      - "8011:8001"
     environment:
       - SERVICE_NAME=auth
       - SERVICE_PORT=8001
@@ -93,8 +91,6 @@ services:
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
       - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-60}
       - JWT_REFRESH_TOKEN_EXPIRE_DAYS=${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-7}
-    volumes:
-      - ./backend/src:/app/src
     depends_on:
       postgres:
         condition: service_healthy
@@ -113,15 +109,13 @@ services:
     container_name: mood-iot-patient
     restart: unless-stopped
     ports:
-      - "8002:8002"
+      - "8012:8002"
     environment:
       - SERVICE_NAME=patient
       - SERVICE_PORT=8002
       - DATABASE_URL=${DATABASE_URL:-postgresql://mood_user:mood_secret_2026@postgres:5432/mood_iot}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
-    volumes:
-      - ./backend/src:/app/src
     depends_on:
       postgres:
         condition: service_healthy
@@ -138,7 +132,7 @@ services:
     container_name: mood-iot-scoring
     restart: unless-stopped
     ports:
-      - "8003:8003"
+      - "8013:8003"
     environment:
       - SERVICE_NAME=scoring
       - SERVICE_PORT=8003
@@ -147,8 +141,6 @@ services:
       - SCORING_THRESHOLDS=${SCORING_THRESHOLDS:-40/60/80}
       - MODEL_S3_BUCKET=${MODEL_S3_BUCKET:-mood-iot-models}
       - AWS_ENDPOINT_URL=${AWS_ENDPOINT_URL:-http://localstack:4566}
-    volumes:
-      - ./backend/src:/app/src
     depends_on:
       postgres:
         condition: service_healthy
@@ -167,7 +159,7 @@ services:
     container_name: mood-iot-notification
     restart: unless-stopped
     ports:
-      - "8004:8004"
+      - "8014:8004"
     environment:
       - SERVICE_NAME=notification
       - SERVICE_PORT=8004
@@ -177,8 +169,6 @@ services:
       - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
       - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
       - FCM_CREDENTIALS_JSON=${FCM_CREDENTIALS_JSON:-{}}
-    volumes:
-      - ./backend/src:/app/src
     depends_on:
       postgres:
         condition: service_healthy
@@ -197,7 +187,7 @@ services:
     container_name: mood-iot-teleconsult
     restart: unless-stopped
     ports:
-      - "8005:8005"
+      - "8015:8005"
     environment:
       - SERVICE_NAME=teleconsult
       - SERVICE_PORT=8005
@@ -205,8 +195,6 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - JITSI_SERVER_URL=${JITSI_SERVER_URL:-https://meet.jit.si}
       - JITSI_JWT_SECRET=${JITSI_JWT_SECRET:-change-me}
-    volumes:
-      - ./backend/src:/app/src
     depends_on:
       postgres:
         condition: service_healthy
