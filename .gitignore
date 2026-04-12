@@ -1,2 +1,36 @@
 __pycache__/
 .DS_Store
+desktop.ini
+
+# Node / React / Next.js
+node_modules/
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+ehthumbs.db
+
+# Python
+*.pyc
+*.pyo
+venv/
+.venv/
+
+# QA evidences (generated)
+qa/evidencias/
+
+# Claude
+.claude/
