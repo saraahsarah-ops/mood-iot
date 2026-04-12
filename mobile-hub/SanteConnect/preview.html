@@ -3,392 +3,842 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mood-IoT Mobile Preview</title>
+  <title>Mood-IoT — Application Patient</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #1a1a2e;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: linear-gradient(135deg, #0f0c29 0%, #1a1a3e 40%, #24243e 100%);
       display: flex;
       justify-content: center;
       align-items: center;
       min-height: 100vh;
+      overflow: hidden;
     }
 
-    /* Phone frame */
+    /* ==================== PHONE FRAME ==================== */
     .phone {
-      width: 375px;
-      height: 812px;
-      background: #f0f2f5;
-      border-radius: 40px;
+      width: 390px;
+      height: 844px;
+      background: #f5f5f7;
+      border-radius: 50px;
       overflow: hidden;
-      box-shadow: 0 0 0 8px #222, 0 0 0 10px #444, 0 20px 60px rgba(0,0,0,0.5);
+      box-shadow:
+        0 0 0 3px #1a1a1a,
+        0 0 0 6px #333,
+        0 0 0 8px #1a1a1a,
+        inset 0 0 8px rgba(0,0,0,0.1),
+        0 30px 80px rgba(0,0,0,0.6),
+        0 0 120px rgba(79, 195, 247, 0.08);
       position: relative;
+    }
+
+    /* Dynamic Island */
+    .dynamic-island {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 126px;
+      height: 36px;
+      background: #000;
+      border-radius: 20px;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      padding-right: 12px;
+    }
+    .di-camera {
+      width: 10px;
+      height: 10px;
+      background: radial-gradient(circle, #1a2744 30%, #0d1b2a 60%, #1a2744 80%);
+      border-radius: 50%;
+      box-shadow: 0 0 2px rgba(79, 195, 247, 0.3);
     }
 
     /* Status bar */
     .status-bar {
-      height: 44px;
-      background: #f0f2f5;
+      height: 58px;
       display: flex;
       justify-content: space-between;
-      align-items: center;
-      padding: 0 24px;
-      font-size: 14px;
+      align-items: flex-end;
+      padding: 0 28px 8px;
+      font-size: 15px;
       font-weight: 600;
       color: #1a1a1a;
     }
-    .status-bar .notch {
-      width: 120px;
-      height: 28px;
-      background: #222;
-      border-radius: 0 0 18px 18px;
+    .status-icons {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      font-size: 13px;
+    }
+    .status-icons svg { width: 16px; height: 16px; fill: #1a1a1a; }
+    .battery {
+      width: 25px; height: 12px;
+      border: 1.5px solid #1a1a1a;
+      border-radius: 3px;
+      position: relative;
+      display: inline-block;
+    }
+    .battery::after {
+      content: '';
       position: absolute;
-      top: 0;
+      right: -4px; top: 2.5px;
+      width: 2px; height: 5px;
+      background: #1a1a1a;
+      border-radius: 0 1px 1px 0;
+    }
+    .battery-fill {
+      position: absolute;
+      left: 1.5px; top: 1.5px; bottom: 1.5px;
+      width: 75%;
+      background: #34c759;
+      border-radius: 1.5px;
+    }
+
+    /* ==================== SCREEN ==================== */
+    .screen {
+      height: calc(100% - 58px - 34px);
+      overflow-y: auto;
+      padding: 8px 20px 20px;
+    }
+    .screen::-webkit-scrollbar { display: none; }
+
+    /* Home indicator */
+    .home-indicator {
+      position: absolute;
+      bottom: 10px;
       left: 50%;
       transform: translateX(-50%);
-    }
-    .status-icons { display: flex; gap: 5px; font-size: 12px; }
-
-    /* Screen content */
-    .screen {
-      height: calc(100% - 44px);
-      overflow-y: auto;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      padding: 15px;
-    }
-
-    /* Card */
-    .card {
-      background: white;
-      border-radius: 30px;
-      padding: 24px 20px;
-      width: 100%;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-      text-align: center;
+      width: 134px;
+      height: 5px;
+      background: #1a1a1a;
+      border-radius: 3px;
+      opacity: 0.3;
     }
 
     /* ==================== LOGIN SCREEN ==================== */
-    .login-icon { font-size: 48px; margin-bottom: 8px; }
-    .login-title { font-size: 22px; font-weight: 900; color: #1a1a1a; margin-bottom: 4px; }
-    .login-subtitle { font-size: 14px; color: #636e72; margin-bottom: 28px; }
-
-    .input-field {
-      width: 100%;
-      border: 1px solid #ddd;
-      border-radius: 12px;
-      padding: 14px 16px;
-      font-size: 15px;
-      color: #333;
-      margin-bottom: 12px;
-      outline: none;
-      transition: border-color 0.2s;
+    .login-card {
+      background: white;
+      border-radius: 24px;
+      padding: 32px 24px;
+      box-shadow: 0 2px 20px rgba(0,0,0,0.06);
+      margin-top: 40px;
     }
-    .input-field:focus { border-color: #007AFF; }
-    .input-field::placeholder { color: #999; }
-
-    /* ==================== MAIN SCREEN ==================== */
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      width: 100%;
-      margin-bottom: 16px;
-      text-align: left;
-    }
-    .header-title { font-size: 22px; font-weight: 900; color: #1a1a1a; }
-    .header-welcome { font-size: 14px; color: #636e72; margin-top: 2px; }
-    .header-logout { font-size: 13px; color: #e74c3c; font-weight: 600; cursor: pointer; border: none; background: none; padding-top: 4px; }
-
-    .location-badge {
-      background: #f8f9fa;
-      padding: 4px 12px;
+    .login-logo {
+      width: 72px; height: 72px;
+      background: linear-gradient(135deg, #007AFF 0%, #5856D6 100%);
       border-radius: 20px;
-      margin-bottom: 24px;
-      display: inline-block;
-    }
-    .location-text { font-size: 11px; color: #636e72; font-family: monospace; }
-
-    .stats-grid {
       display: flex;
-      justify-content: space-between;
-      width: 100%;
-      margin-bottom: 24px;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 16px;
+      font-size: 36px;
+      box-shadow: 0 8px 24px rgba(0, 122, 255, 0.3);
     }
-    .stat-box { flex: 1; text-align: center; }
-    .stat-label {
-      font-size: 10px;
-      color: #8e8e93;
-      font-weight: bold;
-      margin-bottom: 6px;
+    .login-title {
+      font-size: 24px;
+      font-weight: 800;
+      color: #1a1a1a;
+      text-align: center;
+      letter-spacing: -0.5px;
+    }
+    .login-subtitle {
+      font-size: 14px;
+      color: #86868b;
+      text-align: center;
+      margin: 4px 0 28px;
+    }
+    .input-group { margin-bottom: 14px; }
+    .input-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #86868b;
       text-transform: uppercase;
       letter-spacing: 0.5px;
+      margin-bottom: 6px;
+      display: block;
     }
-    .stat-value { font-size: 32px; font-weight: 900; color: #2ecc71; }
-    .stat-value.bpm { color: #e74c3c; }
-    .stat-value.sleep { color: #9b59b6; font-size: 24px; }
-
-    /* Sync status */
-    .sync-badge {
-      padding: 8px 16px;
-      border-radius: 12px;
-      margin-bottom: 16px;
+    .input-field {
       width: 100%;
+      border: 2px solid #e5e5ea;
+      border-radius: 14px;
+      padding: 14px 16px;
+      font-size: 16px;
+      font-family: 'Inter', sans-serif;
+      color: #1a1a1a;
+      background: #fafafa;
+      outline: none;
+      transition: all 0.2s;
+    }
+    .input-field:focus {
+      border-color: #007AFF;
+      background: white;
+      box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.1);
+    }
+    .input-field::placeholder { color: #c7c7cc; }
+    .login-error {
+      background: #fff2f2;
+      border: 1px solid #ffcdd2;
+      color: #d32f2f;
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .login-footer {
+      text-align: center;
+      margin-top: 20px;
+      font-size: 11px;
+      color: #c7c7cc;
+    }
+
+    /* ==================== MAIN SCREEN ==================== */
+    .main-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .main-greeting {
+      font-size: 14px;
+      color: #86868b;
+      font-weight: 500;
+    }
+    .main-name {
+      font-size: 26px;
+      font-weight: 800;
+      color: #1a1a1a;
+      letter-spacing: -0.5px;
+    }
+    .avatar {
+      width: 44px; height: 44px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #5856D6, #AF52DE);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      color: white;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    /* Location pill */
+    .location-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: white;
+      padding: 8px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      color: #86868b;
+      font-weight: 500;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+      margin-bottom: 20px;
+    }
+    .location-dot {
+      width: 8px; height: 8px;
+      background: #34c759;
+      border-radius: 50%;
+      animation: pulse-dot 2s infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* Stats cards */
+    .stats-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .stat-card {
+      flex: 1;
+      background: white;
+      border-radius: 20px;
+      padding: 16px 14px;
+      box-shadow: 0 1px 8px rgba(0,0,0,0.04);
+      position: relative;
+      overflow: hidden;
+    }
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+    }
+    .stat-card.steps::before { background: linear-gradient(90deg, #34c759, #30d158); }
+    .stat-card.bpm::before { background: linear-gradient(90deg, #ff3b30, #ff6961); }
+    .stat-card.sleep::before { background: linear-gradient(90deg, #5856D6, #AF52DE); }
+    .stat-icon {
+      font-size: 20px;
+      margin-bottom: 8px;
+    }
+    .stat-value {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -1px;
+      line-height: 1;
+    }
+    .stat-card.steps .stat-value { color: #34c759; }
+    .stat-card.bpm .stat-value { color: #ff3b30; }
+    .stat-card.sleep .stat-value { color: #5856D6; font-size: 22px; }
+    .stat-label {
+      font-size: 11px;
+      color: #86868b;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      margin-top: 4px;
+    }
+
+    /* Extra stats */
+    .extra-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .extra-card {
+      flex: 1;
+      background: white;
+      border-radius: 16px;
+      padding: 12px;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.04);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .extra-icon {
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+    .extra-icon.gps { background: #e8f5e9; }
+    .extra-icon.screen { background: #fff3e0; }
+    .extra-value { font-size: 16px; font-weight: 700; color: #1a1a1a; }
+    .extra-label { font-size: 10px; color: #86868b; font-weight: 500; }
+
+    /* Sync badge */
+    .sync-badge {
+      padding: 10px 16px;
+      border-radius: 14px;
+      margin-bottom: 14px;
       font-size: 13px;
       font-weight: 600;
-      color: #333;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
-    .sync-success { background: #d4edda; }
-    .sync-sending { background: #fff3cd; }
+    .sync-success {
+      background: #e8f5e9;
+      color: #2e7d32;
+      border: 1px solid #c8e6c9;
+    }
+    .sync-sending {
+      background: #fff8e1;
+      color: #f57f17;
+      border: 1px solid #fff9c4;
+    }
+    .sync-error {
+      background: #ffebee;
+      color: #c62828;
+      border: 1px solid #ffcdd2;
+    }
 
     /* Buttons */
     .btn {
       width: 100%;
-      padding: 15px;
-      border-radius: 15px;
+      padding: 16px;
+      border-radius: 16px;
       border: none;
-      font-size: 13px;
-      font-weight: 800;
+      font-size: 15px;
+      font-weight: 700;
+      font-family: 'Inter', sans-serif;
       color: white;
       cursor: pointer;
       margin-bottom: 10px;
-      transition: opacity 0.2s;
+      transition: all 0.2s;
+      letter-spacing: 0.3px;
     }
-    .btn:hover { opacity: 0.9; }
-    .btn:active { opacity: 0.7; }
-    .btn-primary { background: #007AFF; }
-    .btn-secondary { background: #636e72; }
-    .btn-disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0,0,0,0.15); }
+    .btn:active { transform: translateY(0); }
+    .btn-primary {
+      background: linear-gradient(135deg, #007AFF 0%, #5856D6 100%);
+      box-shadow: 0 4px 14px rgba(0, 122, 255, 0.3);
+    }
+    .btn-secondary {
+      background: linear-gradient(135deg, #636e72 0%, #4a5568 100%);
+      box-shadow: 0 4px 14px rgba(0,0,0,0.1);
+    }
+    .btn-logout {
+      background: none;
+      color: #ff3b30;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px;
+      box-shadow: none;
+    }
+    .btn-logout:hover { background: #fff2f2; box-shadow: none; transform: none; }
+    .btn-disabled { opacity: 0.6; cursor: not-allowed; transform: none !important; box-shadow: none !important; }
 
     /* Spinner */
     .spinner {
       display: inline-block;
-      width: 16px;
-      height: 16px;
-      border: 2px solid rgba(255,255,255,0.3);
+      width: 18px; height: 18px;
+      border: 2.5px solid rgba(255,255,255,0.3);
       border-top-color: white;
       border-radius: 50%;
-      animation: spin 0.8s linear infinite;
+      animation: spin 0.7s linear infinite;
       margin-right: 8px;
       vertical-align: middle;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* Navigation dots */
-    .nav-dots {
-      display: flex;
-      justify-content: center;
-      gap: 8px;
-      margin-top: 16px;
-    }
-    .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #ddd;
-      cursor: pointer;
-      transition: background 0.3s;
-    }
-    .dot.active { background: #007AFF; }
-
-    /* Home bar */
-    .home-bar {
-      position: absolute;
-      bottom: 8px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 134px;
-      height: 5px;
-      background: #333;
-      border-radius: 3px;
-    }
-
-    /* Hidden class */
+    /* Hidden */
     .hidden { display: none !important; }
 
-    /* Screenshot label */
-    .screenshot-label {
+    /* ==================== CONSOLE PANEL ==================== */
+    .console-panel {
       position: fixed;
-      top: 12px;
-      left: 12px;
-      background: rgba(0,0,0,0.7);
-      color: white;
-      padding: 6px 14px;
-      border-radius: 8px;
+      right: 20px;
+      top: 20px;
+      width: 440px;
+      max-height: 92vh;
+      background: #0d1117;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.5), 0 0 1px rgba(255,255,255,0.1);
+      font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
       font-size: 12px;
-      font-family: monospace;
       z-index: 100;
+      border: 1px solid #21262d;
+    }
+    .console-header {
+      background: #161b22;
+      color: #8b949e;
+      padding: 12px 16px;
+      font-weight: 600;
+      font-size: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #21262d;
+    }
+    .console-title { color: #58a6ff; }
+    .console-status {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-weight: 600;
+    }
+    .console-status.off { background: #21262d; color: #8b949e; }
+    .console-status.on { background: #0d2818; color: #3fb950; }
+    .console-body {
+      padding: 12px 16px;
+      max-height: 80vh;
+      overflow-y: auto;
+      color: #c9d1d9;
+    }
+    .console-body::-webkit-scrollbar { width: 6px; }
+    .console-body::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+    .log-entry {
+      padding: 3px 0;
+      line-height: 1.6;
+      word-break: break-all;
+    }
+    .log-info { color: #58a6ff; }
+    .log-success { color: #3fb950; }
+    .log-error { color: #f85149; }
+    .log-data { color: #d2a8ff; }
+    .log-arrow { color: #d29922; }
+    .log-dim { color: #484f58; }
+
+    /* ==================== STATUS LABEL ==================== */
+    .status-label {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      background: rgba(13, 17, 23, 0.9);
+      color: #8b949e;
+      padding: 8px 16px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      z-index: 100;
+      border: 1px solid #21262d;
+      backdrop-filter: blur(10px);
+    }
+
+    /* ==================== RESPONSIVE ==================== */
+    @media (max-width: 900px) {
+      .console-panel { display: none; }
+      .status-label { display: none; }
     }
   </style>
 </head>
 <body>
 
-<div class="screenshot-label" id="screenshotLabel">Ecran 1/4 : Login</div>
+<div class="status-label" id="statusLabel">En attente de connexion...</div>
+
+<div class="console-panel">
+  <div class="console-header">
+    <span class="console-title">Console — Flux Backend</span>
+    <span class="console-status off" id="consoleStatus">DECONNECTE</span>
+  </div>
+  <div class="console-body" id="consoleBody"></div>
+</div>
 
 <div class="phone">
+  <div class="dynamic-island">
+    <div class="di-camera"></div>
+  </div>
+
   <div class="status-bar">
-    <span>9:41</span>
-    <div class="notch"></div>
+    <span id="clockDisplay">9:41</span>
     <div class="status-icons">
-      <span>&#9679;&#9679;&#9679;&#9679;</span>
-      <span>WiFi</span>
-      <span>100%</span>
+      <svg viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>
+      <div class="battery"><div class="battery-fill"></div></div>
     </div>
   </div>
 
   <div class="screen">
     <!-- ============ LOGIN SCREEN ============ -->
-    <div class="card" id="loginScreen">
-      <div class="login-icon">🏥</div>
-      <div class="login-title">Mood-IoT</div>
-      <div class="login-subtitle">Application Patient</div>
+    <div id="loginScreen">
+      <div class="login-card">
+        <div class="login-logo">🏥</div>
+        <div class="login-title">Mood-IoT</div>
+        <div class="login-subtitle">Suivi de sante - Patient</div>
 
-      <input class="input-field" type="email" id="emailInput" placeholder="Adresse email" value="sophie.dupont@email.fr">
-      <input class="input-field" type="password" id="passInput" placeholder="Mot de passe" value="••••••••••">
+        <div class="input-group">
+          <label class="input-label">Adresse email</label>
+          <input class="input-field" type="email" id="emailInput" placeholder="patient@email.fr" value="sophie.dupont@email.fr">
+        </div>
+        <div class="input-group">
+          <label class="input-label">Mot de passe</label>
+          <input class="input-field" type="password" id="passInput" placeholder="Votre mot de passe" value="MoodIoT2026!">
+        </div>
 
-      <button class="btn btn-primary" id="loginBtn" onclick="handleLogin()">SE CONNECTER</button>
+        <div class="login-error hidden" id="loginError"></div>
+
+        <button class="btn btn-primary" id="loginBtn" onclick="handleLogin()">Se connecter</button>
+
+        <div class="login-footer">Mood-IoT v2.0 — Fil Rouge Master ADE 2026</div>
+      </div>
     </div>
 
     <!-- ============ MAIN SCREEN ============ -->
-    <div class="card hidden" id="mainScreen">
-      <div class="header">
+    <div class="hidden" id="mainScreen">
+      <div class="main-header">
         <div>
-          <div class="header-title">Mood-IoT</div>
-          <div class="header-welcome">Bonjour, Sophie</div>
+          <div class="main-greeting" id="greetingText">Bonjour</div>
+          <div class="main-name" id="nameText">Sophie</div>
         </div>
-        <button class="header-logout" onclick="handleLogout()">Deconnexion</button>
+        <div class="avatar" id="avatarText" onclick="handleLogout()">SD</div>
       </div>
 
-      <div class="location-badge">
-        <span class="location-text" id="locationText">📍 Localisation...</span>
+      <div class="location-pill">
+        <div class="location-dot"></div>
+        <span id="locationText">48.8566, 2.3522 — Paris</span>
       </div>
 
-      <div class="stats-grid">
-        <div class="stat-box">
-          <div class="stat-label">PAS</div>
+      <!-- Main stats -->
+      <div class="stats-row">
+        <div class="stat-card steps">
+          <div class="stat-icon">🚶</div>
           <div class="stat-value" id="stepsVal">--</div>
+          <div class="stat-label">Pas</div>
         </div>
-        <div class="stat-box">
-          <div class="stat-label">BPM</div>
-          <div class="stat-value bpm" id="bpmVal">--</div>
+        <div class="stat-card bpm">
+          <div class="stat-icon">❤️</div>
+          <div class="stat-value" id="bpmVal">--</div>
+          <div class="stat-label">BPM moy.</div>
         </div>
-        <div class="stat-box">
-          <div class="stat-label">SOMMEIL</div>
-          <div class="stat-value sleep" id="sleepVal">--</div>
+        <div class="stat-card sleep">
+          <div class="stat-icon">🌙</div>
+          <div class="stat-value" id="sleepVal">--</div>
+          <div class="stat-label">Sommeil</div>
         </div>
       </div>
 
+      <!-- Extra stats -->
+      <div class="extra-row">
+        <div class="extra-card">
+          <div class="extra-icon gps">📍</div>
+          <div>
+            <div class="extra-value" id="gpsVal">--</div>
+            <div class="extra-label">Rayon GPS (km)</div>
+          </div>
+        </div>
+        <div class="extra-card">
+          <div class="extra-icon screen">📱</div>
+          <div>
+            <div class="extra-value" id="screenVal">--</div>
+            <div class="extra-label">Ecran (min)</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sync badge -->
       <div class="sync-badge hidden" id="syncBadge"></div>
 
-      <button class="btn btn-primary" id="syncBtn" onclick="handleSync()">SYNCHRONISER</button>
-      <button class="btn btn-secondary" onclick="alert('Ouvre les reglages Health Connect sur Android')">REGLAGES SANTE</button>
+      <!-- Buttons -->
+      <button class="btn btn-primary" id="syncBtn" onclick="handleSync()">Synchroniser</button>
+      <button class="btn btn-secondary" onclick="handleSync()">Historique</button>
+      <button class="btn btn-logout" onclick="handleLogout()">Se deconnecter</button>
     </div>
   </div>
 
-  <div class="home-bar"></div>
-</div>
-
-<div class="nav-dots">
-  <div class="dot active" onclick="showScreen(1)"></div>
-  <div class="dot" onclick="showScreen(2)"></div>
-  <div class="dot" onclick="showScreen(3)"></div>
-  <div class="dot" onclick="showScreen(4)"></div>
+  <div class="home-indicator"></div>
 </div>
 
 <script>
-  let currentScreen = 1;
+  // =====================================================================
+  // CONFIGURATION
+  // =====================================================================
+  const API_BASE = 'http://localhost:8010/api/v1';
 
-  function showScreen(n) {
-    currentScreen = n;
-    const dots = document.querySelectorAll('.dot');
-    dots.forEach((d, i) => d.classList.toggle('active', i === n - 1));
+  const USER_TO_PATIENT = {
+    'b0000000-0000-0000-0000-000000000001': 'c0000000-0000-0000-0000-000000000001',
+    'b0000000-0000-0000-0000-000000000002': 'c0000000-0000-0000-0000-000000000002',
+    'b0000000-0000-0000-0000-000000000003': 'c0000000-0000-0000-0000-000000000003',
+    'b0000000-0000-0000-0000-000000000004': 'c0000000-0000-0000-0000-000000000004',
+  };
 
-    const loginScreen = document.getElementById('loginScreen');
-    const mainScreen = document.getElementById('mainScreen');
-    const syncBadge = document.getElementById('syncBadge');
-    const syncBtn = document.getElementById('syncBtn');
-    const label = document.getElementById('screenshotLabel');
+  let authToken = null;
+  let patientId = null;
+  let userName = '';
 
-    switch(n) {
-      case 1: // Login
-        loginScreen.classList.remove('hidden');
-        mainScreen.classList.add('hidden');
-        label.textContent = 'Ecran 1/4 : Login';
-        break;
-
-      case 2: // Main - datos vacios
-        loginScreen.classList.add('hidden');
-        mainScreen.classList.remove('hidden');
-        document.getElementById('stepsVal').textContent = '--';
-        document.getElementById('bpmVal').textContent = '--';
-        document.getElementById('sleepVal').textContent = '--';
-        document.getElementById('locationText').textContent = '📍 Localisation...';
-        syncBadge.classList.add('hidden');
-        syncBtn.innerHTML = 'SYNCHRONISER';
-        syncBtn.classList.remove('btn-disabled');
-        label.textContent = 'Ecran 2/4 : Accueil (avant sync)';
-        break;
-
-      case 3: // Syncing
-        loginScreen.classList.add('hidden');
-        mainScreen.classList.remove('hidden');
-        syncBtn.innerHTML = '<span class="spinner"></span> SYNCHRONISATION...';
-        syncBtn.classList.add('btn-disabled');
-        syncBadge.classList.add('hidden');
-        document.getElementById('stepsVal').textContent = '--';
-        document.getElementById('bpmVal').textContent = '--';
-        document.getElementById('sleepVal').textContent = '--';
-        label.textContent = 'Ecran 3/4 : Synchronisation en cours';
-        break;
-
-      case 4: // Synced
-        loginScreen.classList.add('hidden');
-        mainScreen.classList.remove('hidden');
-        document.getElementById('stepsVal').textContent = '8 450';
-        document.getElementById('bpmVal').textContent = '72';
-        document.getElementById('sleepVal').textContent = '7h 18m';
-        document.getElementById('locationText').textContent = '📍 48.8566, 2.3522';
-        syncBtn.innerHTML = 'SYNCHRONISER';
-        syncBtn.classList.remove('btn-disabled');
-        syncBadge.textContent = '✅ Synchronise a 19:54';
-        syncBadge.className = 'sync-badge sync-success';
-        label.textContent = 'Ecran 4/4 : Donnees synchronisees';
-        break;
-    }
+  function generateHealthData() {
+    return {
+      date: new Date().toISOString().split('T')[0],
+      heart_rate_avg: Math.round(65 + Math.random() * 20),
+      heart_rate_variability: Math.round(30 + Math.random() * 30),
+      sleep_duration_min: Math.round(360 + Math.random() * 120),
+      sleep_quality_score: Math.round((6 + Math.random() * 4) * 10) / 10,
+      step_count: Math.round(4000 + Math.random() * 8000),
+      gps_radius_km: Math.round((1 + Math.random() * 5) * 10) / 10,
+      gps_locations_count: Math.round(5 + Math.random() * 20),
+      screen_time_min: Math.round(90 + Math.random() * 180),
+      call_count: Math.round(1 + Math.random() * 8),
+      call_duration_min: Math.round(5 + Math.random() * 30),
+      source_platform: 'android_health_connect'
+    };
   }
 
-  function handleLogin() {
+  // =====================================================================
+  // CONSOLE
+  // =====================================================================
+  function log(message, type = 'info') {
+    const body = document.getElementById('consoleBody');
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+    const time = new Date().toLocaleTimeString('fr-FR');
+    const cls = { info:'log-info', success:'log-success', error:'log-error',
+                  data:'log-data', arrow:'log-arrow', dim:'log-dim' }[type] || 'log-info';
+    entry.innerHTML = `<span class="log-dim">[${time}]</span> <span class="${cls}">${message}</span>`;
+    body.appendChild(entry);
+    body.scrollTop = body.scrollHeight;
+  }
+
+  function updateClock() {
+    document.getElementById('clockDisplay').textContent =
+      new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  }
+  updateClock();
+  setInterval(updateClock, 30000);
+
+  function getGreeting() {
+    const h = new Date().getHours();
+    if (h < 12) return 'Bonjour';
+    if (h < 18) return 'Bon apres-midi';
+    return 'Bonsoir';
+  }
+
+  // =====================================================================
+  // LOGIN
+  // =====================================================================
+  async function handleLogin() {
+    const email = document.getElementById('emailInput').value;
+    const password = document.getElementById('passInput').value;
     const btn = document.getElementById('loginBtn');
-    btn.innerHTML = '<span class="spinner"></span> CONNEXION...';
+    const errorDiv = document.getElementById('loginError');
+
+    errorDiv.classList.add('hidden');
+    btn.innerHTML = '<span class="spinner"></span> Connexion...';
     btn.classList.add('btn-disabled');
 
-    setTimeout(() => {
-      btn.innerHTML = 'SE CONNECTER';
+    log('POST /auth/login', 'arrow');
+    log(`Email: ${email}`, 'dim');
+
+    try {
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (!res.ok) {
+        throw new Error(res.status === 401 ? 'Identifiants invalides' : `Erreur ${res.status}`);
+      }
+
+      const data = await res.json();
+      authToken = data.access_token;
+      const firstName = data.user?.first_name || 'Patient';
+      const lastName = data.user?.last_name || '';
+      userName = firstName;
+      patientId = USER_TO_PATIENT[data.user?.id] || data.user?.id;
+
+      log(`Connexion reussie — ${data.user?.role}`, 'success');
+      log(`Token: ${authToken.substring(0, 30)}...`, 'dim');
+
+      const cs = document.getElementById('consoleStatus');
+      cs.textContent = 'CONNECTE';
+      cs.className = 'console-status on';
+
+      document.getElementById('loginScreen').classList.add('hidden');
+      document.getElementById('mainScreen').classList.remove('hidden');
+      document.getElementById('greetingText').textContent = getGreeting();
+      document.getElementById('nameText').textContent = firstName;
+      document.getElementById('avatarText').textContent =
+        (firstName[0] || '') + (lastName[0] || '');
+      document.getElementById('statusLabel').textContent = 'Connecte — Lecture Health Connect...';
+
+      btn.innerHTML = 'Se connecter';
       btn.classList.remove('btn-disabled');
-      showScreen(2);
-    }, 1500);
-  }
 
-  function handleSync() {
-    showScreen(3);
-    setTimeout(() => showScreen(4), 2000);
-  }
+      log('', 'dim');
+      log('=== Synchronisation automatique ===', 'info');
+      setTimeout(() => handleSync(), 1000);
 
-  function handleLogout() {
-    showScreen(1);
-  }
-
-  // Keyboard shortcuts for screenshots
-  document.addEventListener('keydown', (e) => {
-    if (e.key >= '1' && e.key <= '4') {
-      showScreen(parseInt(e.key));
+    } catch (err) {
+      log(`Erreur: ${err.message}`, 'error');
+      errorDiv.innerHTML = `<span>&#9888;</span> ${err.message}`;
+      errorDiv.classList.remove('hidden');
+      btn.innerHTML = 'Se connecter';
+      btn.classList.remove('btn-disabled');
+      document.getElementById('statusLabel').textContent = 'Erreur de connexion';
     }
-    if (e.key === 'ArrowRight' && currentScreen < 4) showScreen(currentScreen + 1);
-    if (e.key === 'ArrowLeft' && currentScreen > 1) showScreen(currentScreen - 1);
-  });
+  }
+
+  // =====================================================================
+  // SYNC
+  // =====================================================================
+  async function handleSync() {
+    const syncBtn = document.getElementById('syncBtn');
+    const syncBadge = document.getElementById('syncBadge');
+
+    syncBtn.innerHTML = '<span class="spinner"></span> Synchronisation...';
+    syncBtn.classList.add('btn-disabled');
+    syncBadge.className = 'sync-badge sync-sending';
+    syncBadge.innerHTML = '<span class="spinner" style="border-color:rgba(245,127,23,0.3);border-top-color:#f57f17;width:14px;height:14px;margin:0;"></span> Lecture des capteurs...';
+    syncBadge.classList.remove('hidden');
+    document.getElementById('statusLabel').textContent = 'Lecture Health Connect...';
+
+    log('Lecture Health Connect SDK...', 'info');
+    log('  requestPermission([Steps, HeartRate, SleepSession])', 'dim');
+    await sleep(800);
+
+    const healthData = generateHealthData();
+
+    log('  Steps: aggregateRecord() = ' + healthData.step_count, 'data');
+    await sleep(400);
+    log('  HeartRate: readRecords() = ' + healthData.heart_rate_avg + ' bpm', 'data');
+    await sleep(400);
+
+    const sleepH = Math.floor(healthData.sleep_duration_min / 60);
+    const sleepM = healthData.sleep_duration_min % 60;
+    log(`  SleepSession: readRecords() = ${sleepH}h ${sleepM}m`, 'data');
+    await sleep(300);
+    log(`  GPS: radius = ${healthData.gps_radius_km} km`, 'data');
+
+    // Update UI
+    document.getElementById('stepsVal').textContent = healthData.step_count.toLocaleString('fr-FR');
+    document.getElementById('bpmVal').textContent = healthData.heart_rate_avg;
+    document.getElementById('sleepVal').textContent = `${sleepH}h${sleepM}m`;
+    document.getElementById('gpsVal').textContent = healthData.gps_radius_km;
+    document.getElementById('screenVal').textContent = healthData.screen_time_min;
+
+    syncBadge.innerHTML = '<span class="spinner" style="border-color:rgba(245,127,23,0.3);border-top-color:#f57f17;width:14px;height:14px;margin:0;"></span> Envoi au serveur...';
+    document.getElementById('statusLabel').textContent = 'Envoi HTTP POST...';
+
+    log('', 'dim');
+    log(`POST /patients/${patientId}/health-data`, 'arrow');
+    log(`Payload: ${JSON.stringify(healthData, null, 0).substring(0, 100)}...`, 'dim');
+
+    await sleep(500);
+
+    try {
+      const res = await fetch(`${API_BASE}/patients/${patientId}/health-data`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`,
+        },
+        body: JSON.stringify(healthData),
+      });
+
+      if (!res.ok) {
+        throw new Error(`${res.status}: ${await res.text()}`);
+      }
+
+      const result = await res.json();
+
+      log(`Reponse: ${JSON.stringify(result)}`, 'success');
+      log(`UPSERT daily_aggregates OK`, 'success');
+
+      const now = new Date().toLocaleTimeString('fr-FR');
+      syncBadge.className = 'sync-badge sync-success';
+      syncBadge.innerHTML = `<span>&#10003;</span> Synchronise a ${now}`;
+      document.getElementById('statusLabel').textContent = `Donnees envoyees — ${now}`;
+
+    } catch (err) {
+      log(`ERREUR: ${err.message}`, 'error');
+      syncBadge.className = 'sync-badge sync-error';
+      syncBadge.innerHTML = `<span>&#10007;</span> ${err.message}`;
+      document.getElementById('statusLabel').textContent = 'Erreur de synchronisation';
+    }
+
+    syncBtn.innerHTML = 'Synchroniser';
+    syncBtn.classList.remove('btn-disabled');
+  }
+
+  // =====================================================================
+  // LOGOUT
+  // =====================================================================
+  function handleLogout() {
+    authToken = null;
+    log('', 'dim');
+    log('Deconnexion', 'info');
+    const cs = document.getElementById('consoleStatus');
+    cs.textContent = 'DECONNECTE';
+    cs.className = 'console-status off';
+    document.getElementById('loginScreen').classList.remove('hidden');
+    document.getElementById('mainScreen').classList.add('hidden');
+    document.getElementById('stepsVal').textContent = '--';
+    document.getElementById('bpmVal').textContent = '--';
+    document.getElementById('sleepVal').textContent = '--';
+    document.getElementById('gpsVal').textContent = '--';
+    document.getElementById('screenVal').textContent = '--';
+    document.getElementById('syncBadge').classList.add('hidden');
+    document.getElementById('statusLabel').textContent = 'En attente de connexion...';
+  }
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 </script>
 
 </body>

@@ -703,11 +703,17 @@ async def sync_health_data(
     puis envoie les donnees ici par HTTP POST.
     UPSERT dans daily_aggregates (patient_id, date).
     """
-    if current_user["role"] == "patient" and current_user["user_id"] != patient_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Acces refuse",
+    if current_user["role"] == "patient":
+        # Verifier que le patient_id correspond au user connecte
+        result = await db.execute(
+            select(Patient).where(Patient.id == patient_id)
         )
+        patient = result.scalars().first()
+        if not patient or str(patient.user_id) != current_user["user_id"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Acces refuse",
+            )
 
     if payload.source_platform not in VALID_PLATFORMS:
         raise HTTPException(
@@ -733,11 +739,16 @@ async def sync_health_data_batch(
     Batch sync : envoyer plusieurs jours de donnees de sante en une seule requete.
     Utile apres une periode hors ligne.
     """
-    if current_user["role"] == "patient" and current_user["user_id"] != patient_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Acces refuse",
+    if current_user["role"] == "patient":
+        result = await db.execute(
+            select(Patient).where(Patient.id == patient_id)
         )
+        patient = result.scalars().first()
+        if not patient or str(patient.user_id) != current_user["user_id"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Acces refuse",
+            )
 
     if len(payload) > 90:
         raise HTTPException(

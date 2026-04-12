@@ -1,0 +1,27 @@
+=== Verification PostgreSQL — Apres Batch Sync ===
+Date d'execution: 2026-04-12T15:15:54.038800
+Patient: c0000000-0000-0000-0000-000000000001 (Sophie Dupont)
+Total enregistrements: count 
+-------
+     7
+(1 row)
+
+Tous les daily_aggregates:
+    date    | heart_rate_avg | step_count | sleep_duration_min |    source_platform     
+------------+----------------+------------+--------------------+------------------------
+ 2026-04-06 |             66 |       5200 |                380 | android_health_connect
+ 2026-04-07 |             70 |       7400 |                410 | android_health_connect
+ 2026-04-08 |             73 |       8900 |                445 | android_health_connect
+ 2026-04-09 |             68 |       6200 |                390 | android_health_connect
+ 2026-04-10 |             71 |       7800 |                420 | android_health_connect
+ 2026-04-11 |             74 |       9100 |                450 | android_health_connect
+ 2026-04-12 |             80 |      11566 |                447 | android_health_connect
+(7 rows)
+
+
+
+Conclusion:
+- Sync individuel (via app): OK
+- UPSERT (pas de doublon): OK
+- Batch sync (3 jours offline): OK
+- source_platform = android_health_connect: OK

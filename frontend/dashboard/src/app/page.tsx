@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import KpiCard from "@/components/KpiCard";
 import PatientCard from "@/components/PatientCard";
 import ScoreChart from "@/components/ScoreChart";
@@ -21,6 +22,7 @@ const DEMO_CHART = Array.from({ length: 21 }, (_, i) => ({
 }));
 
 export default function VueGenerale() {
+  const router = useRouter();
   const critiques = DEMO_PATIENTS.filter((p) => p.score >= 70).length;
   const surveiller = DEMO_PATIENTS.filter((p) => p.score >= 40 && p.score < 70).length;
   const stables = DEMO_PATIENTS.filter((p) => p.score < 40).length;
@@ -28,47 +30,95 @@ export default function VueGenerale() {
     DEMO_PATIENTS.reduce((s, p) => s + p.score, 0) / DEMO_PATIENTS.length,
   );
 
+  const today = new Date().toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+
   return (
-    <div>
-      {/* Titre */}
-      <h1 className="text-2xl font-bold text-gray-800">
-        🏥 Mood-IoT — Dashboard Medecin
-      </h1>
-      <p className="mt-1 text-sm text-gray-500">
-        Suivi en temps reel des patientes depressives
-      </p>
+    <div className="page-enter">
+      {/* Header */}
+      <div className="flex items-end justify-between">
+        <div>
+          <h1 className="text-2xl font-extrabold tracking-tight text-gray-800">
+            Vue generale
+          </h1>
+          <p className="mt-1 text-[13px] text-gray-400">
+            Suivi en temps reel des patientes depressives
+          </p>
+        </div>
+        <p className="text-[13px] text-gray-400 capitalize">{today}</p>
+      </div>
 
       {/* KPI Cards */}
-      <div className="mt-6 grid grid-cols-4 gap-4">
-        <KpiCard emoji="🔴" label="Alertes critiques" value={critiques} color="danger" />
-        <KpiCard emoji="🟡" label="A surveiller" value={surveiller} color="warning" />
-        <KpiCard emoji="🟢" label="Stables" value={stables} color="success" />
-        <KpiCard emoji="📊" label="Score moyen" value={`${scoreMoyen}/100`} color="primary" />
-      </div>
-
-      {/* Liste des patients */}
-      <h2 className="mt-8 text-lg font-semibold text-gray-700">Patientes</h2>
-      <div className="mt-3 space-y-3">
-        {DEMO_PATIENTS.sort((a, b) => b.score - a.score).map((p) => (
-          <PatientCard
-            key={p.id}
-            name={p.name}
-            score={p.score}
-            coaching={p.coaching}
-          />
-        ))}
-      </div>
-
-      {/* Graphique evolution */}
-      <h2 className="mt-8 text-lg font-semibold text-gray-700">
-        📈 Evolution des scores (21 jours)
-      </h2>
-      <div className="mt-3 rounded-xl bg-white p-4 shadow-sm">
-        <ScoreChart
-          data={DEMO_CHART}
-          patients={["Sophie", "Marie", "Lea", "Anna"]}
-          height={350}
+      <div className="mt-6 grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <KpiCard
+          emoji="🚨"
+          label="Alertes critiques"
+          value={critiques}
+          color="danger"
+          trend={{ value: 0, label: "vs hier" }}
         />
+        <KpiCard
+          emoji="⚡"
+          label="A surveiller"
+          value={surveiller}
+          color="warning"
+          trend={{ value: -15, label: "vs sem." }}
+        />
+        <KpiCard
+          emoji="✓"
+          label="Stables"
+          value={stables}
+          color="success"
+          trend={{ value: 8, label: "vs sem." }}
+        />
+        <KpiCard
+          emoji="📊"
+          label="Score moyen"
+          value={`${scoreMoyen}`}
+          color="primary"
+        />
+      </div>
+
+      {/* Chart */}
+      <div className="mt-8">
+        <div className="flex items-center justify-between">
+          <h2 className="text-[15px] font-bold text-gray-700">
+            Evolution des scores
+          </h2>
+          <span className="text-[12px] text-gray-400">21 derniers jours</span>
+        </div>
+        <div className="mt-3 rounded-2xl border border-gray-100 bg-white p-5 shadow-card">
+          <ScoreChart
+            data={DEMO_CHART}
+            patients={["Sophie", "Marie", "Lea", "Anna"]}
+            height={300}
+          />
+        </div>
+      </div>
+
+      {/* Patient list */}
+      <div className="mt-8">
+        <div className="flex items-center justify-between">
+          <h2 className="text-[15px] font-bold text-gray-700">Patientes</h2>
+          <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-semibold text-gray-500">
+            {DEMO_PATIENTS.length}
+          </span>
+        </div>
+        <div className="mt-3 grid grid-cols-1 gap-2.5 lg:grid-cols-2">
+          {DEMO_PATIENTS.sort((a, b) => b.score - a.score).map((p) => (
+            <PatientCard
+              key={p.id}
+              name={p.name}
+              score={p.score}
+              coaching={p.coaching}
+              onClick={() => router.push(`/patient?name=${encodeURIComponent(p.name)}`)}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );

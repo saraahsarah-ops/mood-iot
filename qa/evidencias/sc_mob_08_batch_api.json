@@ -1,0 +1,56 @@
+{
+  "test": "Batch sync — 3 jours de donnees offline",
+  "endpoint": "POST /patients/c0000000-0000-0000-0000-000000000001/health-data/batch",
+  "payload_sent": [
+    {
+      "date": "2026-04-06",
+      "heart_rate_avg": 66,
+      "step_count": 5200,
+      "sleep_duration_min": 380,
+      "source_platform": "android_health_connect"
+    },
+    {
+      "date": "2026-04-07",
+      "heart_rate_avg": 70,
+      "step_count": 7400,
+      "sleep_duration_min": 410,
+      "source_platform": "android_health_connect"
+    },
+    {
+      "date": "2026-04-08",
+      "heart_rate_avg": 73,
+      "step_count": 8900,
+      "sleep_duration_min": 445,
+      "source_platform": "android_health_connect"
+    }
+  ],
+  "response": {
+    "patient_id": "c0000000-0000-0000-0000-000000000001",
+    "synced_count": 3,
+    "synced_at": "2026-04-12T21:15:52.495874+00:00",
+    "results": [
+      {
+        "patient_id": "c0000000-0000-0000-0000-000000000001",
+        "date": "2026-04-06",
+        "source_platform": "android_health_connect",
+        "synced_at": "2026-04-12T21:15:52.463511+00:00",
+        "upserted": true
+      },
+      {
+        "patient_id": "c0000000-0000-0000-0000-000000000001",
+        "date": "2026-04-07",
+        "source_platform": "android_health_connect",
+        "synced_at": "2026-04-12T21:15:52.476963+00:00",
+        "upserted": true
+      },
+      {
+        "patient_id": "c0000000-0000-0000-0000-000000000001",
+        "date": "2026-04-08",
+        "source_platform": "android_health_connect",
+        "synced_at": "2026-04-12T21:15:52.485605+00:00",
+        "upserted": true
+      }
+    ]
+  },
+  "timestamp": "2026-04-12T15:15:52.547237"
+}

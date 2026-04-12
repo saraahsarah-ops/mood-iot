@@ -181,12 +181,13 @@ for item in composants:
     doc.add_paragraph(item, style="List Bullet")
 
 doc.add_paragraph(
-    "Perimetre : 42 cas de test repartis en 9 modules (Infrastructure, Verifications de sante, "
-    "Authentification, Service Patient, Teleconsultation, Scoring, Gateway, Persistance BD, Dashboard Frontend)."
+    "Perimetre : 52 cas de test repartis en 10 modules (Infrastructure, Verifications de sante, "
+    "Authentification, Service Patient, Teleconsultation, Scoring, Gateway, Persistance BD, "
+    "Dashboard Frontend, App Mobile Health Connect)."
 )
 
 p = doc.add_paragraph()
-run = p.add_run("Resultat general : 42 REUSSIS | 0 ECHOUES | 0 En attente")
+run = p.add_run("Resultat general : 52 REUSSIS | 0 ECHOUES | 0 En attente")
 run.font.bold = True
 run.font.color.rgb = RGBColor(0x00, 0x61, 0x00)
 
@@ -405,6 +406,23 @@ add_qa_table(
         ["TC-UC9-06", "Chemin nominal", "Deconnexion et redirection", "Tokens supprimes, redirection login", "Reussi"],
     ])
 
+# UC10
+doc.add_heading("4.10 App Mobile Health Connect (UC10)", level=2)
+add_qa_table(
+    ["ID", "Type", "Description", "Resultat attendu", "Etat"],
+    [
+        ["TC-UC10-01", "Chemin nominal", "Ecran de login app mobile", "Formulaire de connexion affiche", "Reussi"],
+        ["TC-UC10-02", "Chemin nominal", "Login en cours (spinner)", "Spinner visible pendant la requete", "Reussi"],
+        ["TC-UC10-03", "Chemin nominal", "Accueil apres login", "Ecran principal avec nom du patient", "Reussi"],
+        ["TC-UC10-04", "Chemin nominal", "Auto-sync Health Connect", "Synchronisation automatique apres login", "Reussi"],
+        ["TC-UC10-05", "Chemin nominal", "Sync terminee (badge vert)", "Badge vert de succes affiche", "Reussi"],
+        ["TC-UC10-06", "Chemin nominal", "Re-sync UPSERT", "Mise a jour sans doublon en BD", "Reussi"],
+        ["TC-UC10-07", "Verification BD", "Donnees dans PostgreSQL", "Donnees presentes dans daily_aggregates", "Reussi"],
+        ["TC-UC10-08", "Chemin nominal", "Batch sync 3 jours", "3 enregistrements synchronises", "Reussi"],
+        ["TC-UC10-09", "Verification BD", "Verification batch BD", "Tous les enregistrements presents", "Reussi"],
+        ["TC-UC10-10", "Chemin nominal", "Deconnexion app mobile", "Retour a l'ecran de login", "Reussi"],
+    ])
+
 doc.add_page_break()
 
 # ============================================================
@@ -517,6 +535,23 @@ doc.add_heading("5.9 Persistance en base de donnees", level=2)
 add_evidence_image("33_db_persistence.txt", "Evidence 33 : Comptage des enregistrements en BD")
 doc.add_paragraph()
 
+doc.add_heading("5.10 App Mobile Health Connect", level=2)
+mobile_screenshots = [
+    ("sc_mob_01_login.png", "Figure MOB-01 : Ecran de login app mobile"),
+    ("sc_mob_02_login_loading.png", "Figure MOB-02 : Login en cours (spinner)"),
+    ("sc_mob_03_accueil.png", "Figure MOB-03 : Accueil apres login"),
+    ("sc_mob_04_sync_loading.png", "Figure MOB-04 : Synchronisation en cours"),
+    ("sc_mob_05_sync_ok.png", "Figure MOB-05 : Synchronisation reussie (badge vert)"),
+    ("sc_mob_06_resync.png", "Figure MOB-06 : Re-synchronisation UPSERT"),
+    ("sc_mob_07_db_check.txt", "Evidence MOB-07 : Verification PostgreSQL"),
+    ("sc_mob_08_batch_api.json", "Evidence MOB-08 : Batch sync 3 jours (JSON)"),
+    ("sc_mob_09_db_batch.txt", "Evidence MOB-09 : Verification batch en BD"),
+    ("sc_mob_10_logout.png", "Figure MOB-10 : Deconnexion app mobile"),
+]
+for filename, caption in mobile_screenshots:
+    add_evidence_image(filename, caption)
+    doc.add_paragraph()
+
 doc.add_page_break()
 
 # ============================================================
@@ -527,7 +562,7 @@ doc.add_heading("6. Conclusions et recommandations", level=1)
 doc.add_heading("6.1 Conclusions", level=2)
 conclusions = [
     "La plateforme a ete deployee avec succes via Docker Compose (10 conteneurs) en environnement local.",
-    "Sur 42 cas de test : 42 REUSSIS (100%), 0 ECHOUES, 0 En attente.",
+    "Sur 52 cas de test : 52 REUSSIS (100%), 0 ECHOUES, 0 En attente.",
     "Les 6 microservices repondent correctement a leurs verifications de sante (health checks).",
     "Authentification JWT complete : connexion, inscription, rafraichissement, MFA, deconnexion, protection des endpoints.",
     "Les services Patient et Teleconsultation sont connectes a 100% a PostgreSQL.",
@@ -559,4 +594,4 @@ for r in recommandations:
 # ============================================================
 doc.save(OUTPUT)
 print(f"[OK] Fichier Word genere : {OUTPUT}")
-print(f"     42 cas de test documentes avec evidences integrees.")
+print(f"     52 cas de test documentes avec evidences integrees.")

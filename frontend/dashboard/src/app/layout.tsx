@@ -38,8 +38,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   if (!ready || !isAuthenticated) {
     return (
       <html lang="fr">
-        <body className="flex min-h-screen items-center justify-center">
-          <p className="text-gray-400">Chargement...</p>
+        <body className="flex min-h-screen items-center justify-center bg-[#f4f6fb]">
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" />
+            <p className="text-[13px] text-gray-400">Chargement...</p>
+          </div>
         </body>
       </html>
     );
@@ -48,9 +51,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   // Authenticated — full layout
   return (
     <html lang="fr">
-      <body className="flex min-h-screen">
+      <body className="flex min-h-screen bg-[#f4f6fb]">
         <Sidebar />
-        <main className="flex-1 overflow-auto p-8">{children}</main>
+        <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-5 py-5">{children}</main>
       </body>
     </html>
   );

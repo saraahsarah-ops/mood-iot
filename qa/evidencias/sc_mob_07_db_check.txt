@@ -1,0 +1,24 @@
+=== Verification PostgreSQL — daily_aggregates ===
+Date d'execution: 2026-04-12T15:15:51.791261
+Patient: c0000000-0000-0000-0000-000000000001 (Sophie Dupont)
+Requete: SELECT date, heart_rate_avg, step_count, sleep_duration_min,
+                         source_platform, synced_at
+                  FROM daily_aggregates
+                  WHERE patient_id = 'c0000000-0000-0000-0000-000000000001'
+                  ORDER BY date DESC
+                  LIMIT 5;
+
+Resultat:
+    date    | heart_rate_avg | step_count | sleep_duration_min |    source_platform     |           synced_at           
+------------+----------------+------------+--------------------+------------------------+-------------------------------
+ 2026-04-12 |             80 |      11566 |                447 | android_health_connect | 2026-04-12 21:15:49.537114+00
+ 2026-04-11 |             74 |       9100 |                450 | android_health_connect | 2026-04-12 19:55:13.545441+00
+ 2026-04-10 |             71 |       7800 |                420 | android_health_connect | 2026-04-12 19:55:13.526742+00
+ 2026-04-09 |             68 |       6200 |                390 | android_health_connect | 2026-04-12 19:55:13.457679+00
+ 2026-04-08 |             73 |       8900 |                445 | android_health_connect | 2026-04-12 20:19:59.900564+00
+(5 rows)
+
+
+
+Conclusion: Les donnees Health Connect sont bien presentes dans PostgreSQL.
+L'UPSERT fonctionne — une seule ligne par (patient_id, date).
