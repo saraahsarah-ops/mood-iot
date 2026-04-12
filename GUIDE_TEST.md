@@ -357,67 +357,44 @@ docker compose config --quiet && echo "docker-compose.yml OK"
 
 ## 13. Problemes connus et limitations
 
-1. **Patient et Teleconsult services** utilisent encore un stockage in-memory pour le CRUD (pas PostgreSQL). Les donnees ne persistent pas entre redemarrages.
+1. **Patient, Scoring, Notification et Teleconsult services** utilisent encore un stockage in-memory pour le CRUD (pas PostgreSQL). Les donnees ne persistent pas entre redemarrages. Le service Auth est entierement connecte a PostgreSQL.
 2. **Scoring service** necessite des `daily_aggregates` en base pour calculer un score reel.
 3. **Notification channels** (Twilio, FCM, SES) ne fonctionnent pas sans cles API reelles. Le coaching IA Claude necessite `ANTHROPIC_API_KEY`.
 4. **L'app mobile** (React Native/Expo) necessite un device Android avec Health Connect pour lire les donnees de sante reelles.
 5. **Le dashboard** utilise des donnees de demonstration statiques (pas encore connecte a l'API).
+6. **Google Drive + Docker volumes** : Les fichiers `.sql` montes via Docker volumes depuis Google Drive (FUSE) apparaissent comme des repertoires vides dans le conteneur. Si `docker compose down -v` est execute, il faut reinitialiser manuellement la base :
+
+```bash
+# Copier les fichiers SQL dans le conteneur
+docker cp backend/infrastructure/database/01-extensions.sql mood-iot-postgres:/tmp/
+docker cp backend/infrastructure/database/02-schema.sql mood-iot-postgres:/tmp/
+docker cp backend/infrastructure/database/03-indexes.sql mood-iot-postgres:/tmp/
+docker cp backend/infrastructure/database/04-seed.sql mood-iot-postgres:/tmp/
+
+# Executer les scripts
+docker exec mood-iot-postgres sh -c "\
+  psql -U mood_user -d mood_iot -f /tmp/01-extensions.sql && \
+  psql -U mood_user -d mood_iot -f /tmp/02-schema.sql && \
+  psql -U mood_user -d mood_iot -f /tmp/03-indexes.sql && \
+  psql -U mood_user -d mood_iot -f /tmp/04-seed.sql"
+```
 
 ---
 
-## Script de test automatise rapide
+## Script de Smoke Test automatise (40 tests)
+
+Le script `scripts/smoke_test.sh` execute 40 tests automatises couvrant tous les microservices :
 
 ```bash
-#!/bin/bash
-# mood-iot-smoke-test.sh
-set -e
-
-BASE="http://localhost"
-# Puertos remapeados: gateway=8010, auth=8011, patient=8012, scoring=8013, notif=8014, teleconsult=8015
-echo "=== Mood-IoT Smoke Test ==="
-
-echo "[1/6] Health checks..."
-curl -sf $BASE:8010/api/v1/health | python -m json.tool
-curl -sf $BASE:8011/auth/health > /dev/null && echo "  Auth: OK"
-curl -sf $BASE:8012/patients/health > /dev/null && echo "  Patient: OK"
-curl -sf $BASE:8013/scoring/health > /dev/null && echo "  Scoring: OK"
-curl -sf $BASE:8014/notifications/health > /dev/null && echo "  Notification: OK"
-curl -sf $BASE:8015/teleconsult/health > /dev/null && echo "  Teleconsult: OK"
-
-echo ""
-echo "[2/6] Login psychiatre..."
-RESP=$(curl -sf -X POST $BASE:8001/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"dr.martin@mood-iot.fr","password":"MoodIoT2026!"}')
-TOKEN=$(echo $RESP | python -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
-echo "  Token obtenu: ${TOKEN:0:20}..."
-
-echo ""
-echo "[3/6] Login patiente Sophie..."
-RESP_S=$(curl -sf -X POST $BASE:8001/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"sophie.dupont@email.fr","password":"MoodIoT2026!"}')
-TOKEN_S=$(echo $RESP_S | python -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
-echo "  Token Sophie: ${TOKEN_S:0:20}..."
-
-echo ""
-echo "[4/6] /auth/me..."
-curl -sf $BASE:8011/auth/me -H "Authorization: Bearer $TOKEN" | python -m json.tool
-
-echo ""
-echo "[5/6] Gateway proxy test..."
-curl -sf -X POST $BASE:8000/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"dr.martin@mood-iot.fr","password":"MoodIoT2026!"}' | python -c "import sys,json; d=json.load(sys.stdin); print(f'  Gateway proxy: OK (role={d[\"user\"][\"role\"]})')"
-
-echo ""
-echo "[6/6] Database verification..."
-docker exec mood-iot-postgres psql -U mood_user -d mood_iot -c "SELECT count(*) as user_count FROM users;" -t | xargs echo "  Users in DB:"
-docker exec mood-iot-postgres psql -U mood_user -d mood_iot -c "SELECT count(*) as patient_count FROM patients;" -t | xargs echo "  Patients in DB:"
-docker exec mood-iot-postgres psql -U mood_user -d mood_iot -c "SELECT count(*) as tables FROM information_schema.tables WHERE table_schema='public';" -t | xargs echo "  Tables in DB:"
-
-echo ""
-echo "=== Tous les tests passes ==="
+bash scripts/smoke_test.sh
 ```
 
-Sauvegardez ce script dans `mood-iot-smoke-test.sh` et lancez-le avec `bash mood-iot-smoke-test.sh`.
+**Couvre :**
+- 11 health checks (gateway + 5 services direct + 5 via gateway)
+- 14 tests auth (login, register, refresh, MFA, me, logout, erreurs)
+- 8 tests patient (CRUD, PHQ-9, health data sync, batch, validation)
+- 3 tests teleconsult (create session, Jitsi room, list)
+- 1 test scoring (history)
+- 3 tests gateway proxy (login, /me, scoring health)
+
+**Resultat attendu :** `PASSED: 40, FAILED: 0`

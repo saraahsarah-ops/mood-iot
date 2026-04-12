@@ -138,6 +138,7 @@ services:
       - SERVICE_PORT=8003
       - DATABASE_URL=${DATABASE_URL:-postgresql://mood_user:mood_secret_2026@postgres:5432/mood_iot}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
       - SCORING_THRESHOLDS=${SCORING_THRESHOLDS:-40/60/80}
       - MODEL_S3_BUCKET=${MODEL_S3_BUCKET:-mood-iot-models}
       - AWS_ENDPOINT_URL=${AWS_ENDPOINT_URL:-http://localstack:4566}
@@ -165,6 +166,7 @@ services:
       - SERVICE_PORT=8004
       - DATABASE_URL=${DATABASE_URL:-postgresql://mood_user:mood_secret_2026@postgres:5432/mood_iot}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
       - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
@@ -193,6 +195,7 @@ services:
       - SERVICE_PORT=8005
       - DATABASE_URL=${DATABASE_URL:-postgresql://mood_user:mood_secret_2026@postgres:5432/mood_iot}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
       - JITSI_SERVER_URL=${JITSI_SERVER_URL:-https://meet.jit.si}
       - JITSI_JWT_SECRET=${JITSI_JWT_SECRET:-change-me}
     depends_on:

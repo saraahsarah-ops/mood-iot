@@ -20,6 +20,7 @@ redis==5.*
 # ── Authentification ──────────────────────────────────────────────────────
 python-jose[cryptography]==3.3.*
 passlib[bcrypt]==1.7.*
+bcrypt==4.0.1
 pyotp==2.9.*
 python-multipart==0.0.*
 email-validator==2.*
@@ -37,7 +38,7 @@ twilio==9.*
 firebase-admin==6.*
 
 # ── AWS ────────────────────────────────────────────────────────────────────
-boto3==1.*
+boto3==1.35.*
 aioboto3==13.*
 
 # ── WebSocket ──────────────────────────────────────────────────────────────

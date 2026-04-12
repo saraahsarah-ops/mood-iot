@@ -11,7 +11,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
-from passlib.context import CryptContext
+import bcrypt
 import pyotp
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,10 +46,19 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
-# Password hashing (bcrypt)
+# Password hashing (bcrypt direct — avoids passlib compatibility issues)
 # ---------------------------------------------------------------------------
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -163,7 +172,7 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
 
     user = User(
         email=payload.email,
-        password_hash=pwd_context.hash(payload.password),
+        password_hash=hash_password(payload.password),
         role=DBUserRole(payload.role.value),
         mfa_enabled=False,
     )
@@ -186,7 +195,7 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
 
-    if user is None or not pwd_context.verify(payload.password, user.password_hash):
+    if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Email ou mot de passe incorrect",
