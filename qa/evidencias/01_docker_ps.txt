@@ -1,0 +1,11 @@
+NAME                    STATUS                 PORTS
+mood-iot-auth           Up 2 hours             0.0.0.0:8011->8001/tcp, [::]:8011->8001/tcp
+mood-iot-dashboard      Up 14 minutes          0.0.0.0:3000->3000/tcp, [::]:3000->3000/tcp
+mood-iot-gateway        Up 2 hours             0.0.0.0:8010->8000/tcp, [::]:8010->8000/tcp
+mood-iot-localstack     Up 2 hours (healthy)   0.0.0.0:4566->4566/tcp, [::]:4566->4566/tcp
+mood-iot-notification   Up 2 hours             0.0.0.0:8014->8004/tcp, [::]:8014->8004/tcp
+mood-iot-patient        Up 2 hours             0.0.0.0:8012->8002/tcp, [::]:8012->8002/tcp
+mood-iot-postgres       Up 2 hours (healthy)   0.0.0.0:5433->5432/tcp, [::]:5433->5432/tcp
+mood-iot-redis          Up 2 hours (healthy)   0.0.0.0:6380->6379/tcp, [::]:6380->6379/tcp
+mood-iot-scoring        Up 2 hours             0.0.0.0:8013->8003/tcp, [::]:8013->8003/tcp
+mood-iot-teleconsult    Up 2 hours             0.0.0.0:8015->8005/tcp, [::]:8015->8005/tcp

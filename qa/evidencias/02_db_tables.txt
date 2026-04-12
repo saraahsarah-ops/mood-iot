@@ -1,0 +1,43 @@
+                 List of relations
+ Schema |         Name         | Type  |   Owner   
+--------+----------------------+-------+-----------
+ public | alert_thresholds     | table | mood_user
+ public | audit_log            | table | mood_user
+ public | baselines            | table | mood_user
+ public | consents             | table | mood_user
+ public | daily_aggregates     | table | mood_user
+ public | escalation_log       | table | mood_user
+ public | feature_vectors      | table | mood_user
+ public | model_versions       | table | mood_user
+ public | mood_entries         | table | mood_user
+ public | notifications        | table | mood_user
+ public | patient_psychiatrist | table | mood_user
+ public | patients             | table | mood_user
+ public | refresh_tokens       | table | mood_user
+ public | risk_scores          | table | mood_user
+ public | session_notes        | table | mood_user
+ public | teleconsult_sessions | table | mood_user
+ public | users                | table | mood_user
+(17 rows)
+
+                  id                  |         email          |    role    | is_active 
+--------------------------------------+------------------------+------------+-----------
+ b0000000-0000-0000-0000-000000000001 | sophie.dupont@email.fr | patient    | t
+ b0000000-0000-0000-0000-000000000002 | marie.laurent@email.fr | patient    | t
+ b0000000-0000-0000-0000-000000000003 | lea.moreau@email.fr    | patient    | t
+ b0000000-0000-0000-0000-000000000004 | anna.bernard@email.fr  | patient    | t
+ 745593a0-59b9-45b5-a75c-296ec419cc14 | test@test.fr           | patient    | t
+ ab716076-6fc6-4f2c-9408-335dc3ea3e6c | test18394@test.fr      | patient    | t
+ 5d450495-aa0e-4ee6-a942-9ca559dda3e2 | test11434@test.fr      | patient    | t
+ c1b74ecc-fb96-4e6f-b3a2-720796b62e68 | test4820@test.fr       | patient    | t
+ a0000000-0000-0000-0000-000000000001 | dr.martin@mood-iot.fr  | psychiatre | t
+(9 rows)
+
+                  id                  | first_name | last_name |               diagnosis                
+--------------------------------------+------------+-----------+----------------------------------------
+ c0000000-0000-0000-0000-000000000001 | Sophie     | Dupont    | Trouble dépressif majeur — insomnie
+ c0000000-0000-0000-0000-000000000002 | Marie      | Laurent   | Épisode dépressif modéré — hypersomnie
+ c0000000-0000-0000-0000-000000000003 | Léa        | Moreau    | Trouble dépressif majeur — insomnie
+ c0000000-0000-0000-0000-000000000004 | Anna       | Bernard   | Épisode dépressif modéré — hypersomnie
+(4 rows)
+

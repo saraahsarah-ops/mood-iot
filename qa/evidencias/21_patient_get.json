@@ -1,0 +1,12 @@
+{
+    "id": "c0000000-0000-0000-0000-000000000001",
+    "first_name": "Sophie",
+    "last_name": "Dupont",
+    "date_of_birth": "1995-03-15",
+    "gender": "female",
+    "email": "sophie.dupont@email.fr",
+    "phone": null,
+    "psychiatre_id": "a0000000-0000-0000-0000-000000000001",
+    "created_at": "2026-04-12T13:03:52.625023+00:00",
+    "updated_at": "2026-04-12T13:03:52.625023+00:00"
+}

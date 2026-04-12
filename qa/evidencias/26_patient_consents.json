@@ -1,0 +1,11 @@
+{
+    "patient_id": "c0000000-0000-0000-0000-000000000001",
+    "consents": {
+        "data_collection": true,
+        "data_sharing_psychiatre": true,
+        "iot_monitoring": true,
+        "ai_scoring": false,
+        "emergency_contact": false
+    },
+    "updated_at": "2026-04-01T00:00:00+00:00"
+}

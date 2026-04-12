@@ -1,0 +1,14 @@
+=== LOGIN PSYCHIATRE ===
+{
+    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJyb2xlIjoicHN5Y2hpYXRyZSIsImV4cCI6MTc3NjAyMjA2MiwidHlwZSI6ImFjY2VzcyJ9.pW_5tJPca422SfN0Uy4wnWLP7x_CIxjh-QfupZgGznc",
+    "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJleHAiOjE3NzY2MjMyNjIsInR5cGUiOiJyZWZyZXNoIn0.mAtoL-DLuRfLpCRYPH0MCHRoH5jD67AIqh7Cb-L46e8",
+    "token_type": "bearer",
+    "expires_in": 3600,
+    "user": {
+        "id": "a0000000-0000-0000-0000-000000000001",
+        "email": "dr.martin@mood-iot.fr",
+        "role": "psychiatre",
+        "first_name": "dr.martin",
+        "last_name": ""
+    }
+}

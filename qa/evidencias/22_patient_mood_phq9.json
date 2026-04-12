@@ -1,0 +1,21 @@
+{
+    "id": "8f64b988-947a-4c56-83f5-ed3b96702043",
+    "patient_id": "c0000000-0000-0000-0000-000000000001",
+    "phq9_scores": [
+        1,
+        2,
+        1,
+        0,
+        2,
+        1,
+        0,
+        1,
+        0
+    ],
+    "phq9_total": 8,
+    "severity": "mild",
+    "notes": "QA test mood",
+    "sleep_hours": 7.0,
+    "activity_minutes": 45,
+    "submitted_at": "2026-04-12T18:28:25.796948+00:00"
+}

@@ -1,0 +1,55 @@
+{
+    "patients": [
+        {
+            "id": "c0000000-0000-0000-0000-000000000004",
+            "first_name": "Anna",
+            "last_name": "Bernard",
+            "date_of_birth": "1990-01-30",
+            "gender": "female",
+            "email": "anna.bernard@email.fr",
+            "phone": null,
+            "psychiatre_id": "a0000000-0000-0000-0000-000000000001",
+            "created_at": "2026-04-12T13:03:52.625023+00:00",
+            "updated_at": "2026-04-12T13:03:52.625023+00:00"
+        },
+        {
+            "id": "c0000000-0000-0000-0000-000000000001",
+            "first_name": "Sophie",
+            "last_name": "Dupont",
+            "date_of_birth": "1995-03-15",
+            "gender": "female",
+            "email": "sophie.dupont@email.fr",
+            "phone": null,
+            "psychiatre_id": "a0000000-0000-0000-0000-000000000001",
+            "created_at": "2026-04-12T13:03:52.625023+00:00",
+            "updated_at": "2026-04-12T13:03:52.625023+00:00"
+        },
+        {
+            "id": "c0000000-0000-0000-0000-000000000002",
+            "first_name": "Marie",
+            "last_name": "Laurent",
+            "date_of_birth": "1992-07-22",
+            "gender": "female",
+            "email": "marie.laurent@email.fr",
+            "phone": null,
+            "psychiatre_id": "a0000000-0000-0000-0000-000000000001",
+            "created_at": "2026-04-12T13:03:52.625023+00:00",
+            "updated_at": "2026-04-12T13:03:52.625023+00:00"
+        },
+        {
+            "id": "c0000000-0000-0000-0000-000000000003",
+            "first_name": "L\u00c3\u00a9a",
+            "last_name": "Moreau",
+            "date_of_birth": "1998-11-08",
+            "gender": "female",
+            "email": "lea.moreau@email.fr",
+            "phone": null,
+            "psychiatre_id": "a0000000-0000-0000-0000-000000000001",
+            "created_at": "2026-04-12T13:03:52.625023+00:00",
+            "updated_at": "2026-04-12T13:03:52.625023+00:00"
+        }
+    ],
+    "total": 4,
+    "page": 1,
+    "page_size": 20
+}

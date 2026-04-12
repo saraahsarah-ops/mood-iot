@@ -1,0 +1,13 @@
+{
+    "status": "healthy",
+    "service": "gateway",
+    "environment": "docker",
+    "timestamp": "2026-04-12T18:27:29.310378+00:00",
+    "services": {
+        "auth": "healthy",
+        "patient": "healthy",
+        "scoring": "healthy",
+        "notification": "healthy",
+        "teleconsult": "healthy"
+    }
+}
