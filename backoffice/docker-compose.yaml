@@ -1,0 +1,42 @@
+services:
+  database-moodiot:
+    image: postgres:13.7
+    container_name: database-moodiot
+    restart: always
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: mood_iot
+    networks:
+      - mood_iot_network
+    ports:
+      - 5433:5432
+    volumes:
+      - ./database-data:/var/lib/postgresql/data
+      - ./configuration/database/1-init.sql:/docker-entrypoint-initdb.d/1-init.sql
+  
+  api-moodiot:
+    build: 
+      context: .
+      dockerfile: ./configuration/api/Dockerfile
+    container_name: api-moodiot
+    restart: always
+    networks:
+      - mood_iot_network
+    ports:
+      - 5002:5000
+    environment:
+      - FLASK_ENV=development
+    command: flask run --host=0.0.0.0 --port=5000 --reload
+    volumes:
+      - ./api:/app
+
+    
+
+
+volumes:
+  database-data:
+
+networks:
+  mood_iot_network:
+    driver: bridge
