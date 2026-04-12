@@ -341,7 +341,7 @@ DOCTOR_SVG_SM = """
 </svg>"""
 
 LOGO_SVG = """
-<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+<svg width="44" height="44" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="lg-logo" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#00BCD4"/><stop offset="100%" stop-color="#1565C0"/>
@@ -486,7 +486,7 @@ with st.sidebar:
     <div style='padding:24px 16px 16px 16px;'>
         <div style='display:flex;align-items:center;gap:10px;margin-bottom:6px;'>
             {LOGO_SVG}
-            <div style='font-size:1.15rem;font-weight:900;color:#E2E8F0;letter-spacing:-0.02em;'>Mood-IoT</div>
+            <div style='font-size:1.5rem;font-weight:900;color:#E2E8F0;letter-spacing:-0.02em;'>Mood-IoT</div>
         </div>
         <div style='font-size:0.68rem;color:#3A5080;margin-top:2px;font-weight:700;
                     padding-left:42px;text-transform:uppercase;letter-spacing:0.08em;'>
