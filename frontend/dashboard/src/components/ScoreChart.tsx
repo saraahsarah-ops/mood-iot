@@ -12,7 +12,7 @@ import {
 } from "recharts";
 
 interface ScoreChartProps {
-  data: { date: string; score: number; patient?: string }[];
+  data: Record<string, string | number>[];
   patients?: string[];
   height?: number;
 }

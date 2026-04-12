@@ -204,6 +204,22 @@ services:
     networks:
       - mood-iot-network
 
+  # ── Dashboard psychiatre (port 3000) ─────────────────────────────────────
+  dashboard:
+    build:
+      context: ./frontend/dashboard
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8010/api/v1}
+    container_name: mood-iot-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api-gateway
+    networks:
+      - mood-iot-network
+
   # ── LocalStack (émule AWS en dev) ────────────────────────────────────────
   localstack:
     image: localstack/localstack:3
