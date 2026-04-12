@@ -133,6 +133,44 @@ class ConsentResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Health Data Sync (Health Connect / HealthKit)
+# ---------------------------------------------------------------------------
+
+
+class HealthDataSync(BaseModel):
+    """Donnees de sante agregees envoyees par l'appli mobile."""
+    date: str = Field(..., description="Date ISO 8601 (YYYY-MM-DD)")
+    heart_rate_avg: Optional[float] = Field(None, ge=0, le=300)
+    heart_rate_variability: Optional[float] = Field(None, ge=0)
+    sleep_duration_min: Optional[float] = Field(None, ge=0, le=1440)
+    sleep_quality_score: Optional[float] = Field(None, ge=0, le=100)
+    step_count: Optional[int] = Field(None, ge=0)
+    gps_radius_km: Optional[float] = Field(None, ge=0)
+    gps_locations_count: Optional[int] = Field(None, ge=0)
+    screen_time_min: Optional[float] = Field(None, ge=0, le=1440)
+    call_count: Optional[int] = Field(None, ge=0)
+    call_duration_min: Optional[float] = Field(None, ge=0)
+    source_platform: str = Field(
+        ..., description="'android_health_connect' ou 'ios_healthkit'"
+    )
+
+
+class HealthDataSyncResponse(BaseModel):
+    patient_id: str
+    date: str
+    source_platform: str
+    synced_at: str
+    upserted: bool
+
+
+class HealthDataBatchResponse(BaseModel):
+    patient_id: str
+    synced_count: int
+    synced_at: str
+    results: list[HealthDataSyncResponse]
+
+
+# ---------------------------------------------------------------------------
 # In-memory store (placeholder)
 # ---------------------------------------------------------------------------
 
@@ -393,6 +431,110 @@ async def update_consents(
         patient_id=patient_id,
         consents=payload,
         updated_at=now,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Endpoints - Health Data Sync (Health Connect / HealthKit → HTTP POST)
+# ---------------------------------------------------------------------------
+
+VALID_PLATFORMS = ("android_health_connect", "ios_healthkit")
+
+
+def _sync_one_entry(patient_id: str, payload: HealthDataSync) -> HealthDataSyncResponse:
+    """Logique UPSERT pour une entree de donnees de sante.
+    TODO: remplacer par vrai UPSERT PostgreSQL via SQLAlchemy.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    key = f"{patient_id}:{payload.date}"
+
+    # Placeholder: stockage en memoire
+    _health_data_db = getattr(_sync_one_entry, "_store", {})
+    upserted = key in _health_data_db
+    _health_data_db[key] = payload.model_dump()
+    _sync_one_entry._store = _health_data_db
+
+    return HealthDataSyncResponse(
+        patient_id=patient_id,
+        date=payload.date,
+        source_platform=payload.source_platform,
+        synced_at=now,
+        upserted=upserted,
+    )
+
+
+@app.post(
+    "/patients/{patient_id}/health-data",
+    response_model=HealthDataSyncResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def sync_health_data(
+    patient_id: str,
+    payload: HealthDataSync,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Recevoir les agregats quotidiens depuis l'appli mobile.
+    L'appli lit Health Connect (Android) ou HealthKit (iOS) sur le device,
+    puis envoie les donnees ici par HTTP POST.
+    UPSERT dans daily_aggregates (patient_id, date).
+    """
+    # Securite : un patient ne peut soumettre que ses propres donnees
+    if current_user["role"] == "patient" and current_user["user_id"] != patient_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acces refuse",
+        )
+
+    if payload.source_platform not in VALID_PLATFORMS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"source_platform doit etre l'un de : {VALID_PLATFORMS}",
+        )
+
+    return _sync_one_entry(patient_id, payload)
+
+
+@app.post(
+    "/patients/{patient_id}/health-data/batch",
+    response_model=HealthDataBatchResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def sync_health_data_batch(
+    patient_id: str,
+    payload: list[HealthDataSync],
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Batch sync : envoyer plusieurs jours de donnees de sante en une seule requete.
+    Utile apres une periode hors ligne (le patient n'a pas ouvert l'appli pendant X jours).
+    """
+    if current_user["role"] == "patient" and current_user["user_id"] != patient_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acces refuse",
+        )
+
+    if len(payload) > 90:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Maximum 90 jours par batch",
+        )
+
+    results = []
+    for entry in payload:
+        if entry.source_platform not in VALID_PLATFORMS:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"source_platform invalide pour la date {entry.date}",
+            )
+        results.append(_sync_one_entry(patient_id, entry))
+
+    return HealthDataBatchResponse(
+        patient_id=patient_id,
+        synced_count=len(results),
+        synced_at=datetime.now(timezone.utc).isoformat(),
+        results=results,
     )
 
 
