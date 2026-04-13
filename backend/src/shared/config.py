@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     # ── ML Scoring ──────────────────────────────────────────────────────────
     SCORING_THRESHOLDS: str = "40/60/80"
     MODEL_S3_BUCKET: str = "mood-iot-models"
+    SCORING_DISABLE_XGBOOST: bool = False
 
     # ── Notifications ───────────────────────────────────────────────────────
     ANTHROPIC_API_KEY: str = ""

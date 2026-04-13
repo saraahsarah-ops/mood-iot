@@ -141,6 +141,7 @@ services:
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
       - SCORING_THRESHOLDS=${SCORING_THRESHOLDS:-40/60/80}
       - MODEL_S3_BUCKET=${MODEL_S3_BUCKET:-mood-iot-models}
+      - SCORING_DISABLE_XGBOOST=${SCORING_DISABLE_XGBOOST:-false}
       - AWS_ENDPOINT_URL=${AWS_ENDPOINT_URL:-http://localstack:4566}
     depends_on:
       postgres:

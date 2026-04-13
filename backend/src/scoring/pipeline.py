@@ -270,6 +270,16 @@ class ScoringPipeline:
         Si le fichier n'existe pas ou si XGBoost n'est pas installe,
         on bascule sur le modele heuristique de repli.
         """
+        from src.shared.config import settings
+        if settings.SCORING_DISABLE_XGBOOST:
+            logger.info(
+                "XGBoost desactive via SCORING_DISABLE_XGBOOST. "
+                "Utilisation exclusive du modele heuristique."
+            )
+            self._use_heuristic = True
+            self._model_version = HEURISTIC_MODEL_VERSION
+            return
+
         if not self._model_path.exists():
             logger.warning(
                 "Modele XGBoost introuvable a '%s'. "
