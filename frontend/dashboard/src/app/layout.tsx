@@ -4,12 +4,15 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import { useAuthStore } from "@/lib/auth";
+import { useNotifStore } from "@/lib/store";
+import { getAllNotifications } from "@/lib/api";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { isAuthenticated, restore, user } = useAuthStore();
   const [ready, setReady] = useState(false);
+  const setStoreItems = useNotifStore((s) => s.setItems);
 
   const isLoginPage = pathname === "/login";
 
@@ -17,6 +20,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     restore();
     setReady(true);
   }, []);
+
+  /* Charger les notifications pour le badge sidebar */
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    getAllNotifications(50)
+      .then((res) => {
+        if (res.notifications) {
+          setStoreItems(res.notifications);
+        }
+      })
+      .catch(() => {});
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (!ready) return;

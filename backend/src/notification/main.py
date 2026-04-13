@@ -223,6 +223,50 @@ async def send_notification(
     )
 
 
+@app.get("/notifications/all", response_model=NotificationListResponse)
+async def list_all_notifications(
+    unread_only: bool = Query(False),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Lister toutes les notifications du psychiatre connecte."""
+    user_id = current_user["user_id"]
+    query = select(Notification).where(Notification.recipient_user_id == user_id)
+
+    if unread_only:
+        query = query.where(Notification.status != NotificationStatus.read)
+
+    # Total
+    count_q = select(func.count(Notification.id)).where(
+        Notification.recipient_user_id == user_id
+    )
+    total_result = await db.execute(count_q)
+    total = total_result.scalar() or 0
+
+    # Non lues
+    unread_q = select(func.count(Notification.id)).where(
+        and_(
+            Notification.recipient_user_id == user_id,
+            Notification.status != NotificationStatus.read,
+        )
+    )
+    unread_result = await db.execute(unread_q)
+    unread = unread_result.scalar() or 0
+
+    # Resultats pagines
+    query = query.order_by(Notification.created_at.desc()).offset(offset).limit(limit)
+    result = await db.execute(query)
+    rows = result.scalars().all()
+
+    return NotificationListResponse(
+        notifications=[_notif_to_response(n) for n in rows],
+        total=total,
+        unread=unread,
+    )
+
+
 @app.get("/notifications/{patient_id}", response_model=NotificationListResponse)
 async def list_notifications(
     patient_id: str,
@@ -304,6 +348,17 @@ async def acknowledge_notification(
     notification.read_at = now
     await db.commit()
 
+    # Audit log
+    from src.shared.audit import log_action
+    await log_action(
+        db,
+        user_id=current_user.get("user_id"),
+        action="acknowledge_notification",
+        resource="notification",
+        resource_id=notification_id,
+        details={"patient_id": str(notification.patient_id)},
+    )
+
     logger.info("Notification %s marquee comme lue", notification_id)
 
     return AcknowledgeResponse(
@@ -311,6 +366,46 @@ async def acknowledge_notification(
         status="read",
         read_at=now.isoformat(),
     )
+
+
+@app.delete(
+    "/notifications/{notification_id}",
+    status_code=status.HTTP_200_OK,
+)
+async def delete_notification(
+    notification_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Supprimer une notification."""
+    result = await db.execute(
+        select(Notification).where(Notification.id == notification_id)
+    )
+    notification = result.scalar_one_or_none()
+
+    if notification is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notification introuvable",
+        )
+
+    # Audit log
+    from src.shared.audit import log_action
+    await log_action(
+        db,
+        user_id=current_user.get("user_id"),
+        action="delete_notification",
+        resource="notification",
+        resource_id=notification_id,
+        details={"patient_id": str(notification.patient_id)},
+    )
+
+    await db.delete(notification)
+    await db.commit()
+
+    logger.info("Notification %s supprimee", notification_id)
+
+    return {"id": notification_id, "deleted": True}
 
 
 @app.get(

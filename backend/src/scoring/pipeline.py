@@ -84,6 +84,60 @@ HEURISTIC_WEIGHTS: dict[str, float] = {
     "z_call_frequency": 0.05,
 }
 
+# ── Direction clinique : +1 = valeur haute = risque, -1 = valeur basse = risque
+# Ex: sommeil reduit → risque, donc direction = -1 (un Z negatif = risque)
+# Ex: screen_time eleve → risque, donc direction = +1 (un Z positif = risque)
+CLINICAL_DIRECTION: dict[str, int] = {
+    "z_sleep_duration": -1,   # dormir MOINS → risque
+    "z_sleep_quality":  -1,   # qualite BASSE → risque
+    "z_heart_rate":     +1,   # BPM ELEVE → risque / stress
+    "z_hrv":            -1,   # HRV BAS → risque / stress
+    "z_step_count":     -1,   # MOINS de pas → risque / inactivite
+    "z_gps_radius":     -1,   # MOINS de mobilite → risque / isolation
+    "z_screen_time":    +1,   # PLUS d'ecran → risque / sedentarite
+    "z_call_frequency": -1,   # MOINS d'appels → risque / isolation
+}
+
+# ── Seuils cliniques absolus (valeurs brutes) ────────────────────────────
+# Penalites supplementaires pour des valeurs objectivement mauvaises,
+# meme si le patient a toujours eu de "mauvaises" baselines.
+# Seuils cliniques a 3 niveaux : critique, modere, leger
+# Basees sur recommandations OMS et litterature clinique psychiatrique
+CLINICAL_THRESHOLDS = {
+    "sleep_duration_min": [
+        # OMS recommande 7-9h (420-540 min). < 6h est un facteur de risque.
+        (lambda v: v < 240, 25),    # <4h  : critique  +25 pts
+        (lambda v: v < 360, 15),    # <6h  : modere    +15 pts
+        (lambda v: v < 420, 8),     # <7h  : leger     +8 pts
+    ],
+    "heart_rate_avg": [
+        # FC repos normale : 60-80 BPM. >= 80 au repos = stress ou deconditionnement.
+        (lambda v: v > 100, 18),    # >100 : critique  +18 pts (tachycardie)
+        (lambda v: v > 90,  12),    # >90  : modere    +12 pts
+        (lambda v: v >= 80, 6),     # >=80 : leger     +6 pts
+    ],
+    "step_count": [
+        # OMS recommande 7000-8000 pas/jour. < 5000 = sedentaire.
+        (lambda v: v < 500,  20),   # <500  : critique +20 pts (alite)
+        (lambda v: v < 2000, 12),   # <2000 : modere   +12 pts
+        (lambda v: v < 5000, 7),    # <5000 : leger    +7 pts (sedentaire)
+    ],
+    "screen_time_min": [
+        # > 4h ecran associe a risque depressif dans la litterature
+        (lambda v: v > 540, 15),    # >9h  : critique +15 pts
+        (lambda v: v > 420, 10),    # >7h  : modere   +10 pts
+        (lambda v: v > 300, 6),     # >5h  : leger    +6 pts
+    ],
+    "heart_rate_variability": [
+        (lambda v: v is not None and v < 15, 12),   # HRV <15ms : +12 pts
+        (lambda v: v is not None and v < 25, 6),    # HRV <25ms : +6 pts
+    ],
+    "sleep_quality_score": [
+        (lambda v: v is not None and v < 3, 12),    # Qualite <3/10  : +12 pts
+        (lambda v: v is not None and v < 5, 6),     # Qualite <5/10  : +6 pts
+    ],
+}
+
 # Ecart-type minimal pour eviter la division par zero
 MIN_STD = 1e-6
 
@@ -454,109 +508,119 @@ class ScoringPipeline:
         slope = ((x - x_mean) * (y - y_mean)).sum() / variance
         return float(slope)
 
-    # ── Etape 5 : Prediction XGBoost (ou heuristique) ────────────────────
+    # ── Etape 5 : Prediction du score (heuristique clinique) ──────────────
 
-    def _predict_score(self, feature_vector: dict[str, float]) -> tuple[float, float]:
+    def _predict_score(
+        self,
+        feature_vector: dict[str, float],
+        raw_metrics: Optional[dict[str, float]] = None,
+    ) -> tuple[float, float]:
         """
-        Predire le score de risque a partir du vecteur de features.
+        Predire le score de risque via un modele hybride clinique.
 
-        Si un modele XGBoost est charge, il est utilise pour la prediction.
-        Sinon, un modele heuristique base sur la moyenne ponderee des
-        valeurs absolues des Z-scores est applique.
+        Combine :
+          A) Moyenne ponderee direction-aware des Z-scores (deviation relative)
+          B) Penalites cliniques absolues (valeurs objectivement dangereuses)
+          C) Ajustement de tendance
 
         Args:
-            feature_vector: Vecteur de features complet.
+            feature_vector: Vecteur de features (Z-scores + trends).
+            raw_metrics: Valeurs brutes du jour {metric_name: value}.
 
         Returns:
             Tuple (score 0-100, confiance 0-1).
         """
-        if not self._use_heuristic and self._model is not None:
-            return self._predict_xgboost(feature_vector)
-        else:
-            return self._predict_heuristic(feature_vector)
-
-    def _predict_xgboost(
-        self, feature_vector: dict[str, float]
-    ) -> tuple[float, float]:
-        """
-        Prediction via le modele XGBoost entraine.
-
-        Args:
-            feature_vector: Vecteur de features.
-
-        Returns:
-            Tuple (score, confiance).
-        """
-        # Construire le tableau numpy dans l'ordre attendu par le modele
-        feature_names = sorted(feature_vector.keys())
-        X = np.array([[feature_vector.get(f, 0.0) for f in feature_names]])
-
-        try:
-            prediction = self._model.predict(X)[0]
-            # Clipper le score entre 0 et 100
-            score = float(np.clip(prediction, 0.0, 100.0))
-            # La confiance est derivee de la coherence des features
-            confidence = self._estimate_confidence(feature_vector)
-            return round(score, 2), round(confidence, 3)
-        except Exception as exc:
-            logger.error(
-                "Erreur de prediction XGBoost : %s. Repli sur l'heuristique.",
-                exc,
-            )
-            return self._predict_heuristic(feature_vector)
-
-    def _predict_heuristic(
-        self, feature_vector: dict[str, float]
-    ) -> tuple[float, float]:
-        """
-        Modele heuristique de repli.
-
-        Calcule une moyenne ponderee des valeurs absolues des Z-scores,
-        puis mappe le resultat sur l'echelle 0-100 via une fonction sigmoide.
-
-        Poids :
-            sleep_duration = 0.20, sleep_quality = 0.15,
-            heart_rate = 0.15, hrv = 0.15, step_count = 0.10,
-            gps_radius = 0.10, screen_time = 0.10, call_frequency = 0.05
-
-        Args:
-            feature_vector: Vecteur de features.
-
-        Returns:
-            Tuple (score 0-100, confiance 0-1).
-        """
-        weighted_sum = 0.0
+        # ── A) Score base sur les Z-scores direction-aware ───────────────
+        weighted_risk = 0.0
         total_weight = 0.0
 
         for z_name, weight in HEURISTIC_WEIGHTS.items():
             z_value = feature_vector.get(z_name)
-            if z_value is not None:
-                weighted_sum += abs(z_value) * weight
-                total_weight += weight
+            if z_value is None:
+                continue
+
+            direction = CLINICAL_DIRECTION.get(z_name, +1)
+            # Contribution au risque : si le Z va dans la direction a risque,
+            # c'est positif. Sinon c'est negatif (protecteur).
+            # Ex: z_sleep_duration=-2.0, direction=-1 → risk_contribution = +2.0
+            risk_contribution = z_value * direction
+            # Seule la contribution positive (risque) est comptee.
+            # Les valeurs protectrices reduisent le score (min 0).
+            weighted_risk += max(0.0, risk_contribution) * weight
+            total_weight += weight
 
         if total_weight < MIN_STD:
-            logger.warning("Aucun Z-score disponible pour le calcul heuristique")
-            return 50.0, 0.0
+            logger.warning("Aucun Z-score disponible pour le calcul")
+            base_score = 30.0
+            confidence = 0.0
+        else:
+            mean_risk_z = weighted_risk / total_weight
+            # Sigmoide : mean_risk_z=0 → ~17, =1 → ~38, =2 → ~65, =3 → ~85
+            base_score = 100.0 / (1.0 + math.exp(-1.0 * (mean_risk_z - 1.8)))
+            n_available = sum(
+                1 for z in HEURISTIC_WEIGHTS if feature_vector.get(z) is not None
+            )
+            confidence = round(n_available / len(HEURISTIC_WEIGHTS) * 0.85, 3)
 
-        # Normaliser par le poids total effectif
-        mean_abs_z = weighted_sum / total_weight
+        # ── B) Penalites cliniques absolues ──────────────────────────────
+        clinical_penalty = 0.0
+        if raw_metrics:
+            for metric_name, thresholds in CLINICAL_THRESHOLDS.items():
+                value = raw_metrics.get(metric_name)
+                if value is None:
+                    continue
+                for condition_fn, penalty in thresholds:
+                    if condition_fn(value):
+                        clinical_penalty += penalty
+                        logger.debug(
+                            "Penalite clinique +%d pour %s=%.1f",
+                            penalty, metric_name, value,
+                        )
+                        break  # On prend seulement le seuil le plus severe
 
-        # Transformation sigmoide pour mapper sur 0-100
-        # Un Z moyen de 0 → ~27, de 2 → ~73, de 3 → ~88
-        score = 100.0 / (1.0 + math.exp(-1.2 * (mean_abs_z - 1.5)))
-        score = round(max(0.0, min(100.0, score)), 2)
+        # ── C) Bonus de comorbidite ──────────────────────────────────────
+        # Quand plusieurs metriques sont simultanement mauvaises,
+        # le risque est plus qu'additif (effet synergique)
+        comorbidity_bonus = 0.0
+        if raw_metrics:
+            bad_count = 0
+            core_metrics_bad = {
+                "sleep_duration_min": lambda v: v < 420,    # <7h
+                "heart_rate_avg":     lambda v: v >= 80,    # >=80 BPM
+                "step_count":         lambda v: v < 5000,   # <5000 pas
+                "screen_time_min":    lambda v: v > 300,    # >5h
+            }
+            for metric_name, is_bad_fn in core_metrics_bad.items():
+                value = raw_metrics.get(metric_name)
+                if value is not None and is_bad_fn(value):
+                    bad_count += 1
+            # 2 metriques mauvaises : +5, 3 : +12, 4 : +20
+            if bad_count >= 4:
+                comorbidity_bonus = 20.0
+            elif bad_count >= 3:
+                comorbidity_bonus = 12.0
+            elif bad_count >= 2:
+                comorbidity_bonus = 5.0
+            if comorbidity_bonus > 0:
+                logger.info(
+                    "Bonus comorbidite +%.0f (%d metriques hors norme)",
+                    comorbidity_bonus, bad_count,
+                )
 
-        # Integrer la tendance comme bonus/malus
+        # ── D) Ajustement de tendance (plafonne a ±10 pts) ────────────────
         trend_7d = feature_vector.get("trend_7d", 0.0)
         trend_14d = feature_vector.get("trend_14d", 0.0)
-        trend_adjustment = (trend_7d * 0.7 + trend_14d * 0.3) * 2.0
-        score = round(max(0.0, min(100.0, score + trend_adjustment)), 2)
+        raw_trend = (trend_7d * 0.7 + trend_14d * 0.3) * 1.0
+        trend_adjustment = max(-10.0, min(10.0, raw_trend))
 
-        # La confiance depend du nombre de features disponibles
-        n_available = sum(
-            1 for z in HEURISTIC_WEIGHTS if feature_vector.get(z) is not None
+        # ── Score final ──────────────────────────────────────────────────
+        score = base_score + clinical_penalty + comorbidity_bonus + trend_adjustment
+        score = round(max(0.0, min(100.0, score)), 2)
+
+        logger.info(
+            "Score decompose: base_z=%.1f + clinical=%.1f + comorbid=%.1f + trend=%.1f = %.1f",
+            base_score, clinical_penalty, comorbidity_bonus, trend_adjustment, score,
         )
-        confidence = round(n_available / len(HEURISTIC_WEIGHTS) * 0.85, 3)
 
         return score, confidence
 
@@ -693,7 +757,7 @@ class ScoringPipeline:
         db: AsyncSession,
     ) -> str:
         """
-        Persister le vecteur de features dans la base de donnees.
+        Persister le vecteur de features dans la base de donnees (UPSERT).
 
         Args:
             patient_id: Identifiant du patient.
@@ -703,27 +767,43 @@ class ScoringPipeline:
             db: Session asynchrone.
 
         Returns:
-            L'identifiant du vecteur de features cree.
+            L'identifiant du vecteur de features.
         """
-        fv_id = str(uuid4())
-        fv = FeatureVector(
-            id=fv_id,
-            patient_id=patient_id,
-            date=target_date,
-            z_heart_rate=zscores.get("z_heart_rate"),
-            z_hrv=zscores.get("z_hrv"),
-            z_sleep_duration=zscores.get("z_sleep_duration"),
-            z_sleep_quality=zscores.get("z_sleep_quality"),
-            z_step_count=zscores.get("z_step_count"),
-            z_gps_radius=zscores.get("z_gps_radius"),
-            z_screen_time=zscores.get("z_screen_time"),
-            z_call_frequency=zscores.get("z_call_frequency"),
-            trend_7d=feature_vector.get("trend_7d", 0.0),
-            trend_14d=feature_vector.get("trend_14d", 0.0),
-            is_weekend=feature_vector.get("is_weekend", 0.0),
-            vector_json=json.dumps(feature_vector),
+        # Check if a feature vector already exists for this patient+date
+        existing = await db.execute(
+            select(FeatureVector).where(
+                and_(
+                    FeatureVector.patient_id == patient_id,
+                    FeatureVector.date == target_date,
+                )
+            )
         )
-        db.add(fv)
+        fv = existing.scalar_one_or_none()
+
+        if fv is None:
+            fv_id = str(uuid4())
+            fv = FeatureVector(
+                id=fv_id,
+                patient_id=patient_id,
+                date=target_date,
+            )
+            db.add(fv)
+        else:
+            fv_id = str(fv.id)
+
+        fv.z_heart_rate = zscores.get("z_heart_rate")
+        fv.z_hrv = zscores.get("z_hrv")
+        fv.z_sleep_duration = zscores.get("z_sleep_duration")
+        fv.z_sleep_quality = zscores.get("z_sleep_quality")
+        fv.z_step_count = zscores.get("z_step_count")
+        fv.z_gps_radius = zscores.get("z_gps_radius")
+        fv.z_screen_time = zscores.get("z_screen_time")
+        fv.z_call_frequency = zscores.get("z_call_frequency")
+        fv.trend_7d = feature_vector.get("trend_7d", 0.0)
+        fv.trend_14d = feature_vector.get("trend_14d", 0.0)
+        fv.is_weekend = feature_vector.get("is_weekend", 0.0)
+        fv.vector_json = json.dumps(feature_vector)
+
         await db.flush()
 
         logger.debug(
@@ -746,7 +826,7 @@ class ScoringPipeline:
         db: AsyncSession,
     ) -> str:
         """
-        Persister le score de risque dans la base de donnees.
+        Persister le score de risque dans la base de donnees (UPSERT).
 
         Args:
             patient_id: Identifiant du patient.
@@ -759,21 +839,37 @@ class ScoringPipeline:
             db: Session asynchrone.
 
         Returns:
-            L'identifiant du score de risque cree.
+            L'identifiant du score de risque.
         """
-        score_id = str(uuid4())
-        risk_score = RiskScore(
-            id=score_id,
-            patient_id=patient_id,
-            date=target_date,
-            score=score,
-            alert_level=alert_level,
-            model_version=self._model_version,
-            feature_vector_id=feature_vector_id,
-            shap_values=shap_values,
-            confidence=confidence,
+        # Check if a score already exists for this patient+date
+        existing = await db.execute(
+            select(RiskScore).where(
+                and_(
+                    RiskScore.patient_id == patient_id,
+                    RiskScore.date == target_date,
+                )
+            )
         )
-        db.add(risk_score)
+        risk_score = existing.scalar_one_or_none()
+
+        if risk_score is None:
+            score_id = str(uuid4())
+            risk_score = RiskScore(
+                id=score_id,
+                patient_id=patient_id,
+                date=target_date,
+            )
+            db.add(risk_score)
+        else:
+            score_id = str(risk_score.id)
+
+        risk_score.score = score
+        risk_score.alert_level = alert_level
+        risk_score.model_version = self._model_version
+        risk_score.feature_vector_id = feature_vector_id
+        risk_score.shap_values = shap_values
+        risk_score.confidence = confidence
+
         await db.flush()
 
         logger.info(
@@ -867,8 +963,15 @@ class ScoringPipeline:
         )
         logger.debug("Vecteur de features : %s", feature_vector)
 
+        # Extraire les valeurs brutes pour les seuils cliniques absolus
+        raw_metrics = {}
+        for metric_col in METRIC_MAPPING:
+            val = getattr(aggregate, metric_col, None)
+            if val is not None:
+                raw_metrics[metric_col] = float(val)
+
         # Etape 5 : Prediction du score
-        score, confidence = self._predict_score(feature_vector)
+        score, confidence = self._predict_score(feature_vector, raw_metrics)
 
         # Etape 6 : Explication SHAP
         shap_explanations = self._compute_shap_values(feature_vector)

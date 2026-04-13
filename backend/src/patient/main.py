@@ -390,6 +390,17 @@ async def get_patient(
         if check.scalar_one_or_none() is None:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acces refuse")
 
+    # Audit log
+    from src.shared.audit import log_action
+    await log_action(
+        db,
+        user_id=current_user.get("user_id"),
+        action="view_patient",
+        resource="patient",
+        resource_id=patient_id,
+    )
+    await db.commit()
+
     psych_id = await _get_primary_psychiatrist(patient_id, db)
     email = await _get_patient_email(patient.user_id, db)
     return _patient_to_response(patient, psych_id, email)
@@ -806,6 +817,91 @@ async def sync_health_data_batch(
         synced_at=datetime.now(timezone.utc).isoformat(),
         results=results,
     )
+
+
+# ---------------------------------------------------------------------------
+# Endpoint - Metriques patient (latest aggregate + baselines calculees)
+# ---------------------------------------------------------------------------
+
+
+class MetricsResponse(BaseModel):
+    patient_id: str
+    date: Optional[str] = None
+    heart_rate_avg: Optional[float] = None
+    heart_rate_variability: Optional[float] = None
+    sleep_duration_min: Optional[float] = None
+    sleep_quality_score: Optional[float] = None
+    step_count: Optional[int] = None
+    screen_time_min: Optional[float] = None
+    gps_radius_km: Optional[float] = None
+    call_count: Optional[int] = None
+    call_duration_min: Optional[float] = None
+    baselines: Optional[dict] = None
+
+
+@app.get("/patients/{patient_id}/metrics", response_model=MetricsResponse)
+async def get_patient_metrics(
+    patient_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Recuperer les metriques les plus recentes d'un patient
+    (derniere journee) et les baselines calculees sur l'historique.
+    """
+    # Verify patient exists
+    pat_result = await db.execute(select(Patient.id).where(Patient.id == patient_id))
+    if pat_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient introuvable")
+
+    # Get latest daily aggregate
+    agg_result = await db.execute(
+        select(DailyAggregate)
+        .where(DailyAggregate.patient_id == patient_id)
+        .order_by(DailyAggregate.date.desc())
+        .limit(1)
+    )
+    latest = agg_result.scalar_one_or_none()
+
+    # Calculate baselines from all history (mean of all daily aggregates)
+    baseline_result = await db.execute(
+        select(
+            func.avg(DailyAggregate.heart_rate_avg).label("hr_avg"),
+            func.avg(DailyAggregate.sleep_duration_min).label("sleep_avg"),
+            func.avg(DailyAggregate.step_count).label("steps_avg"),
+            func.avg(DailyAggregate.screen_time_min).label("screen_avg"),
+            func.avg(DailyAggregate.heart_rate_variability).label("hrv_avg"),
+            func.avg(DailyAggregate.sleep_quality_score).label("sq_avg"),
+        ).where(DailyAggregate.patient_id == patient_id)
+    )
+    bl = baseline_result.one()
+
+    baselines = {
+        "heart_rate_avg": round(float(bl.hr_avg), 1) if bl.hr_avg else 68,
+        "sleep_duration_min": round(float(bl.sleep_avg), 1) if bl.sleep_avg else 450,
+        "step_count": round(float(bl.steps_avg)) if bl.steps_avg else 8500,
+        "screen_time_min": round(float(bl.screen_avg), 1) if bl.screen_avg else 180,
+        "heart_rate_variability": round(float(bl.hrv_avg), 1) if bl.hrv_avg else 40,
+        "sleep_quality_score": round(float(bl.sq_avg), 1) if bl.sq_avg else 7,
+    }
+
+    if latest:
+        return MetricsResponse(
+            patient_id=patient_id,
+            date=str(latest.date),
+            heart_rate_avg=latest.heart_rate_avg,
+            heart_rate_variability=latest.heart_rate_variability,
+            sleep_duration_min=latest.sleep_duration_min,
+            sleep_quality_score=latest.sleep_quality_score,
+            step_count=latest.step_count,
+            screen_time_min=latest.screen_time_min,
+            gps_radius_km=latest.gps_radius_km,
+            call_count=latest.call_count,
+            call_duration_min=latest.call_duration_min,
+            baselines=baselines,
+        )
+
+    return MetricsResponse(patient_id=patient_id, baselines=baselines)
 
 
 # ---------------------------------------------------------------------------

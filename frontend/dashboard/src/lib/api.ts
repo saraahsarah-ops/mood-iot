@@ -1,6 +1,6 @@
 /* Client API — communique avec le backend FastAPI */
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8010/api/v1";
 
 async function fetcher<T>(path: string, options?: RequestInit): Promise<T> {
   const token =
@@ -36,6 +36,10 @@ export async function getPatient(id: string) {
   return fetcher<any>(`/patients/${id}`);
 }
 
+export async function getPatientMetrics(patientId: string) {
+  return fetcher<any>(`/patients/${patientId}/metrics`);
+}
+
 /* ── Scoring ──────────────────────────────────────────── */
 export async function getLatestScore(patientId: string) {
   return fetcher<any>(`/scoring/latest/${patientId}`);
@@ -60,6 +64,10 @@ export async function explainScore(scoreId: string) {
 }
 
 /* ── Notifications ────────────────────────────────────── */
+export async function getAllNotifications(limit = 50) {
+  return fetcher<any>(`/notifications/all?limit=${limit}`);
+}
+
 export async function getNotifications(
   patientId: string,
   unreadOnly = false,
@@ -72,6 +80,12 @@ export async function getNotifications(
 export async function acknowledgeNotification(notifId: string) {
   return fetcher<any>(`/notifications/${notifId}/acknowledge`, {
     method: "PUT",
+  });
+}
+
+export async function deleteNotification(notifId: string) {
+  return fetcher<any>(`/notifications/${notifId}`, {
+    method: "DELETE",
   });
 }
 

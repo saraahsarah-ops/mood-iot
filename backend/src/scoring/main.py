@@ -15,10 +15,15 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from uuid import uuid4
+
 from src.shared.config import settings
 from src.shared.auth import get_current_user, require_role
 from src.shared.database import get_db
-from src.shared.models import RiskScore, FeatureVector, Patient, Baseline, DailyAggregate
+from src.shared.models import (
+    RiskScore, FeatureVector, Patient, Baseline, DailyAggregate,
+    PatientPsychiatrist, Notification, NotificationType, NotificationChannel, NotificationStatus,
+)
 from src.scoring.pipeline import get_pipeline, METRIC_MAPPING
 
 logger = logging.getLogger("mood_iot.scoring")
@@ -135,6 +140,78 @@ async def health():
     return {"status": "healthy", "service": "scoring"}
 
 
+# ---------------------------------------------------------------------------
+# Notification helper — cree une alerte en DB pour le psychiatre
+# ---------------------------------------------------------------------------
+
+ALERT_TITLES = {
+    1: "Score modere",
+    2: "Score eleve",
+    3: "Alerte critique",
+}
+ALERT_TYPES = {
+    1: NotificationType.coaching_ia,
+    2: NotificationType.alerte_psychiatre,
+    3: NotificationType.urgence,
+}
+
+
+async def _create_alert_notification(
+    patient_id: str,
+    score: float,
+    alert_level: int,
+    score_id: str,
+    top_features: list[dict],
+    db: AsyncSession,
+):
+    """Cree une notification dans la table notifications pour le psychiatre referent."""
+    # Recuperer le nom du patient
+    pat_result = await db.execute(select(Patient).where(Patient.id == patient_id))
+    patient = pat_result.scalar_one_or_none()
+    if not patient:
+        return
+
+    # Recuperer le psychiatre referent
+    ref_result = await db.execute(
+        select(PatientPsychiatrist.psychiatrist_id)
+        .where(PatientPsychiatrist.patient_id == patient_id)
+        .limit(1)
+    )
+    psychiatrist_row = ref_result.scalar_one_or_none()
+    if not psychiatrist_row:
+        logger.warning("Aucun psychiatre referent pour patient %s", patient_id)
+        return
+
+    # Construire le message
+    title = ALERT_TITLES.get(alert_level, "Alerte")
+    features_text = ". ".join(f["message"] for f in top_features[:3]) if top_features else ""
+    body = f"{patient.first_name} {patient.last_name} — Score {score:.0f}/100. {features_text}"
+
+    notif = Notification(
+        patient_id=patient_id,
+        risk_score_id=score_id,
+        type=ALERT_TYPES.get(alert_level, NotificationType.system),
+        level=min(alert_level, 3),
+        channel=NotificationChannel.websocket,
+        title=title,
+        body=body,
+        recipient_user_id=str(psychiatrist_row),
+        status=NotificationStatus.sent,
+        sent_at=datetime.now(timezone.utc),
+    )
+    db.add(notif)
+    await db.commit()
+    logger.info(
+        "Notification creee pour patient %s (level=%d, score=%.1f)",
+        patient_id, alert_level, score,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+
 @app.post(
     "/scoring/compute/{patient_id}",
     response_model=ScoreResponse,
@@ -195,28 +272,42 @@ async def compute_score(
             detail=str(e),
         )
 
-    # Declencher l'escalade si alert_level >= 1
-    if result.get("alert_level", 0) >= 1:
+    # Creer une notification SEULEMENT pour le score du jour le plus recent
+    # (pas pour les recomputes historiques)
+    from datetime import timedelta as _td
+    is_recent = target_date >= (date.today() - _td(days=1))
+    if result.get("alert_level", 0) >= 1 and is_recent:
         try:
-            from src.notification.escalation import EscalationEngine
-            engine = EscalationEngine()
-            await engine.process_alert(
+            await _create_alert_notification(
                 patient_id=patient_id,
                 score=result["score"],
                 alert_level=result["alert_level"],
-                risk_score_id=str(result["risk_score_id"]),
-                shap_explanations=result.get("shap_explanations", []),
+                score_id=str(result["score_id"]),
+                top_features=result.get("top_features", []),
                 db=db,
             )
-            logger.info(
-                "Escalade declenchee pour patient %s (niveau %d, score %.1f)",
-                patient_id, result["alert_level"], result["score"],
-            )
         except Exception:
-            logger.exception("Erreur lors de l'escalade pour patient %s", patient_id)
+            logger.exception("Erreur creation notification pour patient %s", patient_id)
+
+    # Audit log
+    from src.shared.audit import log_action
+    await log_action(
+        db,
+        user_id=current_user.get("user_id"),
+        action="compute_score",
+        resource="risk_score",
+        resource_id=str(result["score_id"]),
+        details={
+            "patient_id": patient_id,
+            "score": result["score"],
+            "alert_level": result["alert_level"],
+            "date": str(target_date),
+        },
+    )
+    await db.commit()
 
     return ScoreResponse(
-        score_id=str(result["risk_score_id"]),
+        score_id=str(result["score_id"]),
         patient_id=patient_id,
         date=str(target_date),
         score=result["score"],

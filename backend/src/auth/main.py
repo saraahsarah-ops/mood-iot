@@ -217,6 +217,17 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
             first_name = patient.first_name
             last_name = patient.last_name
 
+    # Audit log
+    from src.shared.audit import log_action
+    await log_action(
+        db,
+        user_id=str(user.id),
+        action="login",
+        resource="session",
+        details={"email": user.email, "role": user.role.value},
+    )
+    await db.commit()
+
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,

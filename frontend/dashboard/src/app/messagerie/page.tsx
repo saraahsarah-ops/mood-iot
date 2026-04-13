@@ -3,34 +3,71 @@ import { useState, useRef, useEffect } from "react";
 import MessageBubble from "@/components/MessageBubble";
 import { useMessageStore } from "@/lib/store";
 import { getRiskEmoji } from "@/lib/types";
+import { getPatients, getLatestScore } from "@/lib/api";
 
-const PATIENTS = [
-  { id: "1", name: "Sophie L.", score: 82 },
-  { id: "2", name: "Marie D.", score: 55 },
-  { id: "3", name: "Lea R.", score: 35 },
-  { id: "4", name: "Anna K.", score: 68 },
-];
+interface PatientInfo {
+  id: string;
+  name: string;
+  score: number;
+}
 
 const QUICK_MSGS = [
-  { icon: "📞", label: "Appel prevu", text: "Je vous appelle dans la journee pour faire le point." },
-  { icon: "💊", label: "Rappel medicament", text: "Pensez a prendre votre traitement ce soir." },
-  { icon: "🌟", label: "Encouragement", text: "Vous faites du bon travail, continuez ainsi !" },
+  { icon: "\u{1F4DE}", label: "Appel prevu", text: "Je vous appelle dans la journee pour faire le point." },
+  { icon: "\u{1F48A}", label: "Rappel medicament", text: "Pensez a prendre votre traitement ce soir." },
+  { icon: "\u{1F31F}", label: "Encouragement", text: "Vous faites du bon travail, continuez ainsi !" },
 ];
 
 export default function MessageriePage() {
-  const [selected, setSelected] = useState(PATIENTS[0]);
+  const [patients, setPatients] = useState<PatientInfo[]>([]);
+  const [selected, setSelected] = useState<PatientInfo | null>(null);
   const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(true);
   const { conversations, addMessage } = useMessageStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const messages = conversations[selected.id] || [];
+  const messages = selected ? conversations[selected.id] || [] : [];
+
+  /* Charger patients + scores reels */
+  useEffect(() => {
+    async function load() {
+      try {
+        const res = await getPatients(1, 50);
+        const list = res.patients || [];
+
+        const withScores: PatientInfo[] = await Promise.all(
+          list.map(async (p: any) => {
+            let score = 0;
+            try {
+              const s = await getLatestScore(p.id);
+              score = Math.round(s.score ?? 0);
+            } catch {
+              /* pas de score encore */
+            }
+            return {
+              id: p.id,
+              name: `${p.first_name} ${p.last_name?.charAt(0) || ""}.`,
+              score,
+            };
+          })
+        );
+
+        setPatients(withScores);
+        if (withScores.length > 0) setSelected(withScores[0]);
+      } catch (err) {
+        console.error("Erreur chargement patients:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
 
   function send(text: string) {
-    if (!text.trim()) return;
+    if (!text.trim() || !selected) return;
     const now = new Date();
     addMessage(selected.id, {
       id: crypto.randomUUID(),
@@ -39,6 +76,25 @@ export default function MessageriePage() {
       heure: `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`,
     });
     setInput("");
+  }
+
+  if (loading) {
+    return (
+      <div className="flex h-[60vh] items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" />
+          <p className="text-[13px] text-gray-400">Chargement...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!selected) {
+    return (
+      <div className="flex h-[60vh] items-center justify-center">
+        <p className="text-gray-400">Aucune patiente trouvee.</p>
+      </div>
+    );
   }
 
   const scoreColor =
@@ -64,10 +120,10 @@ export default function MessageriePage() {
           </svg>
           <select
             value={selected.id}
-            onChange={(e) => setSelected(PATIENTS.find((p) => p.id === e.target.value)!)}
+            onChange={(e) => setSelected(patients.find((p) => p.id === e.target.value)!)}
             className="border-none bg-transparent py-2.5 pr-8 text-[13px] font-medium text-gray-700 focus:outline-none"
           >
-            {PATIENTS.map((p) => (
+            {patients.map((p) => (
               <option key={p.id} value={p.id}>
                 {getRiskEmoji(p.score)} {p.name} — {p.score}/100
               </option>

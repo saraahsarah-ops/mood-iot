@@ -174,6 +174,15 @@ async def proxy_auth(request: Request, path: str):
 
 
 @app.api_route(
+    "/api/v1/patients",
+    methods=["GET", "POST"],
+)
+async def proxy_patient_base(request: Request):
+    """Proxy vers le service Patient — route de base (liste)."""
+    return await _proxy(request, "patient", "patients")
+
+
+@app.api_route(
     "/api/v1/patients/{path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
 )

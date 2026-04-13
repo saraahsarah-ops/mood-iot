@@ -617,12 +617,12 @@ class Notification(Base):
         nullable=True,
     )
     type: Mapped[NotificationType] = mapped_column(
-        PgEnum(NotificationType, name="notification_type", create_type=True),
+        PgEnum(NotificationType, name="notif_type", create_type=False),
         nullable=False,
     )
     level: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     channel: Mapped[NotificationChannel] = mapped_column(
-        PgEnum(NotificationChannel, name="notification_channel", create_type=True),
+        PgEnum(NotificationChannel, name="notif_channel", create_type=False),
         nullable=False,
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -633,7 +633,7 @@ class Notification(Base):
         nullable=False,
     )
     status: Mapped[NotificationStatus] = mapped_column(
-        PgEnum(NotificationStatus, name="notification_status", create_type=True),
+        PgEnum(NotificationStatus, name="notif_status", create_type=False),
         default=NotificationStatus.pending,
     )
     sent_at: Mapped[Optional[datetime]] = mapped_column(

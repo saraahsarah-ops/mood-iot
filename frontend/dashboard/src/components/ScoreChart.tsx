@@ -14,7 +14,7 @@ import {
 } from "recharts";
 
 interface ScoreChartProps {
-  data: Record<string, string | number>[];
+  data: Record<string, string | number | null>[];
   patients?: string[];
   height?: number;
 }
@@ -23,11 +23,13 @@ const COLORS = ["#0288d1", "#e74c3c", "#2ecc71", "#9b59b6", "#f39c12"];
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload) return null;
+  const validItems = payload.filter((item: any) => item.value != null);
+  if (validItems.length === 0) return null;
   return (
     <div className="rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-lg">
       <p className="text-xs font-semibold text-gray-500">{label}</p>
       <div className="mt-1 space-y-1">
-        {payload.map((item: any, i: number) => (
+        {validItems.map((item: any, i: number) => (
           <div key={i} className="flex items-center gap-2">
             <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
             <span className="text-xs text-gray-600">{item.name}:</span>
@@ -84,6 +86,7 @@ export default function ScoreChart({ data, patients, height = 300 }: ScoreChartP
               strokeWidth={2.5}
               dot={false}
               activeDot={{ r: 4, strokeWidth: 2, fill: "#fff" }}
+              connectNulls={false}
             />
           ))}
         </LineChart>

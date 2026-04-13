@@ -1,34 +1,77 @@
 "use client";
-import { useNotifStore } from "@/lib/store";
+import { useState, useEffect } from "react";
 import NotificationCard from "@/components/NotificationCard";
-import { useEffect } from "react";
-import type { Notification } from "@/lib/types";
+import { getAllNotifications, acknowledgeNotification, deleteNotification } from "@/lib/api";
+import { useNotifStore } from "@/lib/store";
 
-const DEMO_NOTIFS: Notification[] = [
-  {
-    id: "1", patient_id: "1", type: "urgence", level: 3,
-    channel: "push_fcm", title: "Alerte critique", recipient_user_id: "doc1",
-    body: "Sophie L. — Score 82/100. Protocole d'urgence active.",
-    status: "sent", sent_at: "2026-04-12T10:30:00Z", read_at: null,
-    created_at: "2026-04-12T10:30:00Z",
-  },
-  {
-    id: "2", patient_id: "4", type: "alerte_psychiatre", level: 2,
-    channel: "websocket", title: "Score eleve", recipient_user_id: "doc1",
-    body: "Anna K. — Score 68/100. Sommeil perturbe depuis 3 jours.",
-    status: "sent", sent_at: "2026-04-12T09:15:00Z", read_at: null,
-    created_at: "2026-04-12T09:15:00Z",
-  },
-];
+import type { Notification as NotifData } from "@/lib/types";
 
 export default function NotificationsPage() {
-  const { items, setItems, markRead, markAllRead, unreadCount } = useNotifStore();
+  const [items, setItems] = useState<NotifData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const setStoreItems = useNotifStore((s) => s.setItems);
+
+  /* Synchroniser le store global pour le badge sidebar */
+  const syncStore = (list: NotifData[]) => setStoreItems(list);
 
   useEffect(() => {
-    if (items.length === 0) setItems(DEMO_NOTIFS);
+    async function load() {
+      try {
+        const res = await getAllNotifications(50);
+        const notifs = res.notifications || [];
+        setItems(notifs);
+        syncStore(notifs);
+      } catch (err) {
+        console.error("Erreur chargement notifications:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
   }, []);
 
-  const unread = unreadCount();
+  const markRead = async (id: string) => {
+    try {
+      await acknowledgeNotification(id);
+      const updated = items.map((n) =>
+        n.id === id ? { ...n, status: "read" } : n
+      );
+      setItems(updated);
+      syncStore(updated);
+    } catch (err) {
+      console.error("Erreur acknowledge:", err);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await deleteNotification(id);
+      const updated = items.filter((n) => n.id !== id);
+      setItems(updated);
+      syncStore(updated);
+    } catch (err) {
+      console.error("Erreur suppression:", err);
+    }
+  };
+
+  /* Extraire le score reel depuis le body ("Score de risque XX/100") */
+  const extractScore = (body: string): number => {
+    const m = body.match(/Score\s+(?:de\s+risque\s+)?(\d+(?:\.\d+)?)\s*\/\s*100/i);
+    return m ? Math.round(parseFloat(m[1])) : 0;
+  };
+
+  const unreadCount = items.filter((n) => n.status !== "read").length;
+
+  if (loading) {
+    return (
+      <div className="flex h-[60vh] items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" />
+          <p className="text-[13px] text-gray-400">Chargement...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page-enter">
@@ -42,28 +85,21 @@ export default function NotificationsPage() {
             Alertes et mises a jour des patientes
           </p>
         </div>
-        {unread > 0 && (
-          <button
-            onClick={markAllRead}
-            className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2 text-[13px] font-medium text-gray-600 shadow-card transition-all hover:border-success-400 hover:bg-success-50 hover:text-success-500"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-            </svg>
-            Tout marquer comme lu
-          </button>
-        )}
       </div>
 
       {/* Stats bar */}
       <div className="mt-6 flex items-center gap-4">
         <div className="flex items-center gap-2 rounded-xl bg-white px-4 py-2 shadow-card">
           <span className="h-2 w-2 rounded-full bg-danger-500 animate-pulse-soft" />
-          <span className="text-[13px] font-medium text-gray-600">{unread} non lue{unread > 1 ? "s" : ""}</span>
+          <span className="text-[13px] font-medium text-gray-600">
+            {unreadCount} non lue{unreadCount > 1 ? "s" : ""}
+          </span>
         </div>
         <div className="flex items-center gap-2 rounded-xl bg-white px-4 py-2 shadow-card">
           <span className="h-2 w-2 rounded-full bg-gray-300" />
-          <span className="text-[13px] font-medium text-gray-600">{items.length - unread} lue{items.length - unread > 1 ? "s" : ""}</span>
+          <span className="text-[13px] font-medium text-gray-600">
+            {items.length - unreadCount} lue{items.length - unreadCount > 1 ? "s" : ""}
+          </span>
         </div>
       </div>
 
@@ -87,11 +123,13 @@ export default function NotificationsPage() {
             <NotificationCard
               key={n.id}
               patientName={n.title}
-              score={n.level * 30}
+              score={extractScore(n.body)}
+              level={n.level}
               message={n.body}
               time={new Date(n.created_at).toLocaleString("fr-FR")}
               read={n.status === "read"}
               onMarkRead={() => markRead(n.id)}
+              onDelete={() => handleDelete(n.id)}
             />
           ))}
         </div>

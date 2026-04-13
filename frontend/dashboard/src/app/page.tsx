@@ -1,34 +1,112 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import KpiCard from "@/components/KpiCard";
 import PatientCard from "@/components/PatientCard";
 import ScoreChart from "@/components/ScoreChart";
+import { getPatients, getLatestScore, getScoreHistory } from "@/lib/api";
 
-/* Donnees de demonstration (remplacer par appels API) */
-const DEMO_PATIENTS = [
-  { id: "1", name: "Sophie L.", score: 82, coaching: "Votre medecin a ete informe et va vous contacter rapidement." },
-  { id: "2", name: "Marie D.", score: 55, coaching: "Votre sommeil semble perturbe. Essayez une courte marche aujourd'hui." },
-  { id: "3", name: "Lea R.", score: 35, coaching: "Continuez comme ca, votre routine est stable." },
-  { id: "4", name: "Anna K.", score: 68, coaching: "Votre sommeil semble perturbe. Essayez une courte marche aujourd'hui." },
-];
+interface PatientData {
+  id: string;
+  name: string;
+  score: number;
+  coaching: string;
+}
 
-const DEMO_CHART = Array.from({ length: 21 }, (_, i) => ({
-  date: `J${i + 1}`,
-  Sophie: Math.min(100, 12 + i * 4 + Math.round(Math.random() * 10 - 5)),
-  Marie: Math.min(100, 15 + i * 3 + Math.round(Math.random() * 10 - 5)),
-  Lea: Math.min(100, 10 + i * 1.5 + Math.round(Math.random() * 8 - 4)),
-  Anna: Math.min(100, 18 + i * 3.5 + Math.round(Math.random() * 10 - 5)),
-}));
+function coachingMessage(score: number): string {
+  if (score >= 70)
+    return "Votre medecin a ete informe et va vous contacter rapidement.";
+  if (score >= 40)
+    return "Votre sommeil semble perturbe. Essayez une courte marche aujourd'hui.";
+  return "Continuez comme ca, votre routine est stable.";
+}
 
 export default function VueGenerale() {
   const router = useRouter();
-  const critiques = DEMO_PATIENTS.filter((p) => p.score >= 70).length;
-  const surveiller = DEMO_PATIENTS.filter((p) => p.score >= 40 && p.score < 70).length;
-  const stables = DEMO_PATIENTS.filter((p) => p.score < 40).length;
-  const scoreMoyen = Math.round(
-    DEMO_PATIENTS.reduce((s, p) => s + p.score, 0) / DEMO_PATIENTS.length,
-  );
+  const [patients, setPatients] = useState<PatientData[]>([]);
+  const [chartData, setChartData] = useState<Record<string, string | number | null>[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadData() {
+      try {
+        // 1. Fetch patients
+        const res = await getPatients(1, 50);
+        const patientList = res.patients || [];
+
+        // 2. Fetch latest score for each patient
+        const withScores: PatientData[] = [];
+        for (const p of patientList) {
+          let score = 0;
+          try {
+            const s = await getLatestScore(p.id);
+            score = Math.round(s.score);
+          } catch {
+            // No score yet
+          }
+          withScores.push({
+            id: p.id,
+            name: `${p.first_name} ${(p.last_name || "")[0]}.`,
+            score,
+            coaching: coachingMessage(score),
+          });
+        }
+        setPatients(withScores);
+
+        // 3. Fetch score history for chart (each patient last 21 days)
+        const nameMap: Record<string, string> = {};
+        const allDates = new Set<string>();
+        const histories: Record<string, Record<string, number>> = {};
+
+        for (const p of withScores) {
+          const shortName = p.name.split(" ")[0];
+          nameMap[p.id] = shortName;
+          histories[shortName] = {};
+          try {
+            const h = await getScoreHistory(p.id, 21);
+            for (const s of h.scores || []) {
+              const d = s.date;
+              allDates.add(d);
+              histories[shortName][d] = Math.round(s.score);
+            }
+          } catch {
+            // No history
+          }
+        }
+
+        const sortedDates = Array.from(allDates).sort();
+        const chart = sortedDates.map((d) => {
+          const entry: Record<string, string | number | null> = {
+            date: d.slice(5), // MM-DD
+          };
+          for (const name of Object.keys(histories)) {
+            // null si pas de score pour cette date (evite d'afficher 0)
+            entry[name] = histories[name][d] ?? null;
+          }
+          return entry;
+        });
+        setChartData(chart);
+      } catch (err) {
+        console.error("Erreur chargement:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadData();
+  }, []);
+
+  const critiquesList = patients.filter((p) => p.score >= 70);
+  const surveillerList = patients.filter((p) => p.score >= 40 && p.score < 70);
+  const stablesList = patients.filter((p) => p.score < 40);
+  const critiques = critiquesList.length;
+  const surveiller = surveillerList.length;
+  const stables = stablesList.length;
+  const scoreMoyen =
+    patients.length > 0
+      ? Math.round(
+          patients.reduce((s, p) => s + p.score, 0) / patients.length
+        )
+      : 0;
 
   const today = new Date().toLocaleDateString("fr-FR", {
     weekday: "long",
@@ -36,6 +114,31 @@ export default function VueGenerale() {
     month: "long",
     year: "numeric",
   });
+
+  const patientNames = patients.length > 0
+    ? [...new Set(patients.map((p) => p.name.split(" ")[0]))]
+    : [];
+
+  const toKpiPatients = (list: PatientData[]) =>
+    list.map((p) => ({ id: p.id, name: p.name, score: p.score }));
+
+  const handlePatientClick = (id: string) => {
+    const p = patients.find((pt) => pt.id === id);
+    if (p) router.push(`/patient?id=${id}&name=${encodeURIComponent(p.name)}`);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex h-[60vh] items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" />
+          <p className="text-[13px] text-gray-400">
+            Chargement des donnees...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page-enter">
@@ -59,21 +162,24 @@ export default function VueGenerale() {
           label="Alertes critiques"
           value={critiques}
           color="danger"
-          trend={{ value: 0, label: "vs hier" }}
+          patients={toKpiPatients(critiquesList)}
+          onPatientClick={handlePatientClick}
         />
         <KpiCard
           emoji="⚡"
           label="A surveiller"
           value={surveiller}
           color="warning"
-          trend={{ value: -15, label: "vs sem." }}
+          patients={toKpiPatients(surveillerList)}
+          onPatientClick={handlePatientClick}
         />
         <KpiCard
           emoji="✓"
           label="Stables"
           value={stables}
           color="success"
-          trend={{ value: 8, label: "vs sem." }}
+          patients={toKpiPatients(stablesList)}
+          onPatientClick={handlePatientClick}
         />
         <KpiCard
           emoji="📊"
@@ -89,14 +195,20 @@ export default function VueGenerale() {
           <h2 className="text-[15px] font-bold text-gray-700">
             Evolution des scores
           </h2>
-          <span className="text-[12px] text-gray-400">21 derniers jours</span>
+          <span className="text-[12px] text-gray-400">Historique</span>
         </div>
         <div className="mt-3 rounded-2xl border border-gray-100 bg-white p-5 shadow-card">
-          <ScoreChart
-            data={DEMO_CHART}
-            patients={["Sophie", "Marie", "Lea", "Anna"]}
-            height={300}
-          />
+          {chartData.length > 0 ? (
+            <ScoreChart
+              data={chartData}
+              patients={patientNames}
+              height={300}
+            />
+          ) : (
+            <p className="py-10 text-center text-[13px] text-gray-400">
+              Aucun historique de scores disponible
+            </p>
+          )}
         </div>
       </div>
 
@@ -105,19 +217,23 @@ export default function VueGenerale() {
         <div className="flex items-center justify-between">
           <h2 className="text-[15px] font-bold text-gray-700">Patientes</h2>
           <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-semibold text-gray-500">
-            {DEMO_PATIENTS.length}
+            {patients.length}
           </span>
         </div>
         <div className="mt-3 grid grid-cols-1 gap-2.5 lg:grid-cols-2">
-          {DEMO_PATIENTS.sort((a, b) => b.score - a.score).map((p) => (
-            <PatientCard
-              key={p.id}
-              name={p.name}
-              score={p.score}
-              coaching={p.coaching}
-              onClick={() => router.push(`/patient?name=${encodeURIComponent(p.name)}`)}
-            />
-          ))}
+          {patients
+            .sort((a, b) => b.score - a.score)
+            .map((p) => (
+              <PatientCard
+                key={p.id}
+                name={p.name}
+                score={p.score}
+                coaching={p.coaching}
+                onClick={() =>
+                  router.push(`/patient?id=${p.id}&name=${encodeURIComponent(p.name)}`)
+                }
+              />
+            ))}
         </div>
       </div>
     </div>
