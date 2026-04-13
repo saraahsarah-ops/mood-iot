@@ -35,7 +35,7 @@ from src.shared.models import (
 
 logger = logging.getLogger("mood_iot.patient")
 
-SCORING_SERVICE_URL = "http://scoring:8003"
+SCORING_SERVICE_URL = "http://ml-scoring:8003"
 
 # ---------------------------------------------------------------------------
 # Application

@@ -1,12 +1,14 @@
 {
-  "cv_rmse_mean": 6.7469,
-  "cv_rmse_std": 1.1696,
-  "cv_mae_mean": 5.2161,
-  "final_rmse": 0.4384,
-  "final_mae": 0.3161,
-  "final_r2": 0.9997,
-  "classification_accuracy": 1.0,
-  "n_samples": 84,
+  "dataset": "Depresjon (Simula Research Lab)",
+  "dataset_url": "https://datasets.simula.no/depresjon/",
+  "cv_rmse_mean": 15.3641,
+  "cv_rmse_std": 0.9135,
+  "cv_mae_mean": 10.925,
+  "final_rmse": 8.4715,
+  "final_mae": 5.9079,
+  "final_r2": 0.8426,
+  "classification_accuracy": 0.8891,
+  "n_samples": 1118,
   "n_features": 11,
   "feature_names": [
     "is_weekend",
@@ -22,17 +24,17 @@
     "z_step_count"
   ],
   "feature_importances": {
-    "z_step_count": 0.6202,
-    "z_screen_time": 0.1956,
-    "z_call_frequency": 0.0622,
-    "trend_14d": 0.0523,
-    "trend_7d": 0.021,
-    "z_heart_rate": 0.0187,
-    "z_hrv": 0.0083,
-    "z_gps_radius": 0.0078,
-    "z_sleep_quality": 0.0059,
-    "z_sleep_duration": 0.0056,
-    "is_weekend": 0.0024
+    "trend_14d": 0.232,
+    "z_step_count": 0.1268,
+    "z_sleep_quality": 0.1221,
+    "trend_7d": 0.1005,
+    "z_sleep_duration": 0.0889,
+    "z_screen_time": 0.0647,
+    "z_gps_radius": 0.0639,
+    "z_hrv": 0.0622,
+    "z_call_frequency": 0.0608,
+    "z_heart_rate": 0.0574,
+    "is_weekend": 0.0207
   },
   "hyperparameters": {
     "n_estimators": 200,
@@ -45,5 +47,6 @@
     "objective": "reg:squarederror",
     "random_state": 42
   },
-  "trained_at": "2026-04-12T18:07:00.451807"
+  "label_source": "MADRS scores (clinician-rated)",
+  "trained_at": "2026-04-12T19:10:16.198156"
 }

@@ -1,33 +1,36 @@
 """
 Mood-IoT : Entrainement du modele XGBoost de scoring de risque
 ================================================================
-Utilise les donnees du simulateur (donnees.csv) pour entrainer un modele
-XGBoost qui predit le score de risque (0-100) a partir des Z-scores.
+Utilise le dataset Depresjon (Simula Research Lab) — donnees cliniques
+reelles d'actigraphie (55 patients, ~14 jours) avec scores MADRS.
+
+Source : https://datasets.simula.no/depresjon/
+Licence : CC BY 4.0 / CC0-1.0
 
 Flux :
-  1. Charger donnees.csv (4 patientes x 21 jours = 84 lignes)
-  2. Mapper les colonnes du simulateur vers le schema daily_aggregates
-  3. Calculer les baselines (mean/std) sur les 7 premiers jours (baseline)
-  4. Calculer les Z-scores pour chaque jour
-  5. Construire les features (Z-scores + trend + is_weekend)
-  6. Generer les labels de risque (0-100) via la progression simulee
+  1. Charger les CSV d'actigraphie (1 fichier/patient, 1 mesure/minute)
+  2. Agreger par jour : activite moyenne, variance, sommeil, rythme circadien
+  3. Mapper MADRS (0-60) -> score de risque (0-100)
+  4. Calculer les baselines (mean/std) par patient
+  5. Calculer les Z-scores pour chaque jour
+  6. Construire les features (Z-scores + trend + is_weekend)
   7. Entrainer XGBoost avec cross-validation
   8. Evaluer (RMSE, MAE, R2, classification en 4 niveaux)
   9. Sauvegarder le modele dans models/xgboost_risk_model.json
 
 Usage :
-  cd backend/src/scoring
-  python train_model.py
+  cd backend
+  python -m src.scoring.train_model
 """
 
-import csv
 import math
 import json
 import os
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from statistics import mean, stdev
+from collections import defaultdict
 
 import numpy as np
 
@@ -35,34 +38,25 @@ import numpy as np
 # Configuration
 # ---------------------------------------------------------------------------
 
-SIMULATEUR_CSV = Path(__file__).resolve().parent.parent.parent.parent / "simulateur" / "donnees.csv"
+DATA_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data" / "depresjon" / "data"
+SCORES_CSV = DATA_DIR / "scores.csv"
 MODEL_OUTPUT = Path(__file__).resolve().parent.parent.parent / "models" / "xgboost_risk_model.json"
 METRICS_OUTPUT = MODEL_OUTPUT.parent / "training_metrics.json"
 
-# Mapping : colonnes simulateur -> metriques pipeline
-COLUMN_MAP = {
-    "battements_coeur":   "heart_rate_avg",
-    "sommeil_heures":     "sleep_duration_min",  # heures -> minutes
-    "pas":                "step_count",
-    "nb_lieux_visites":   "gps_radius_km",       # proxy : nb lieux -> km
-    "temps_ecran_heures": "screen_time_min",      # heures -> minutes
-}
-
-# Z-score feature names (must match pipeline ZSCORE_COLUMN_MAPPING)
-ZSCORE_NAMES = {
-    "heart_rate_avg":     "z_heart_rate",
-    "sleep_duration_min": "z_sleep_duration",
-    "step_count":         "z_step_count",
-    "gps_radius_km":      "z_gps_radius",
-    "screen_time_min":    "z_screen_time",
-}
-
-# Jours de baseline (1-7), rechute (8-21)
-BASELINE_DAYS = 7
-TOTAL_DAYS = 21
-
 # Seuils de score (meme que pipeline)
 THRESHOLDS = (40, 60, 80)
+
+# Heures de "nuit" pour estimer sommeil (23h-7h)
+NIGHT_START = 23
+NIGHT_END = 7
+
+# Features attendues par le pipeline (11 features, ordre alphabetique)
+PIPELINE_FEATURES = sorted([
+    "is_weekend", "trend_14d", "trend_7d",
+    "z_call_frequency", "z_gps_radius", "z_heart_rate",
+    "z_hrv", "z_screen_time", "z_sleep_duration",
+    "z_sleep_quality", "z_step_count",
+])
 
 
 def classify_risk(score: float) -> str:
@@ -77,108 +71,259 @@ def classify_risk(score: float) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 1. Charger et mapper les donnees du simulateur
+# 1. Charger les scores MADRS
 # ---------------------------------------------------------------------------
 
-def load_simulator_data() -> list[dict]:
-    """Charge donnees.csv et convertit en format daily_aggregates."""
-    print(f"[1/9] Chargement de {SIMULATEUR_CSV}...")
+def load_madrs_scores() -> dict:
+    """Charge scores.csv et retourne {patient_id: {'madrs1': x, 'madrs2': y, 'days': n, 'group': str}}."""
+    print(f"[1/9] Chargement des scores MADRS depuis {SCORES_CSV}...")
 
-    if not SIMULATEUR_CSV.exists():
-        print(f"  ERREUR : {SIMULATEUR_CSV} introuvable.")
-        print(f"  Lancez d'abord : cd simulateur && python simulateur.py")
-        sys.exit(1)
-
-    rows = []
-    with open(SIMULATEUR_CSV, "r", encoding="utf-8") as f:
+    import csv
+    scores = {}
+    with open(SCORES_CSV, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            mapped = {
-                "patiente": row["patiente"],
-                "jour": int(row["jour"]),
-                "date": row["date"],
-                "heart_rate_avg": float(row["battements_coeur"]),
-                "sleep_duration_min": float(row["sommeil_heures"]) * 60,  # h -> min
-                "step_count": float(row["pas"]),
-                "gps_radius_km": float(row["nb_lieux_visites"]) * 1.5,   # proxy
-                "screen_time_min": float(row["temps_ecran_heures"]) * 60, # h -> min
+            pid = row["number"].strip()
+            group = "condition" if pid.startswith("condition") else "control"
+            madrs1 = float(row["madrs1"]) if row["madrs1"].strip() not in ("NA", "") else 0.0
+            madrs2 = float(row["madrs2"]) if row["madrs2"].strip() not in ("NA", "") else 0.0
+            days = int(row["days"])
+            scores[pid] = {
+                "madrs1": madrs1,
+                "madrs2": madrs2,
+                "days": days,
+                "group": group,
             }
-            rows.append(mapped)
 
-    patients = set(r["patiente"] for r in rows)
-    print(f"  -> {len(rows)} lignes, {len(patients)} patientes: {patients}")
-    return rows
+    n_cond = sum(1 for v in scores.values() if v["group"] == "condition")
+    n_ctrl = sum(1 for v in scores.values() if v["group"] == "control")
+    print(f"  -> {len(scores)} patients ({n_cond} depresses, {n_ctrl} controles)")
+    print(f"  -> MADRS condition: {[s['madrs1'] for s in scores.values() if s['group']=='condition']}")
+    return scores
 
 
 # ---------------------------------------------------------------------------
-# 2. Calculer les baselines par patiente (jours 1-7)
+# 2. Charger et agreger les CSV d'actigraphie par jour
+# ---------------------------------------------------------------------------
+
+def load_and_aggregate_actigraphy(madrs_scores: dict) -> list[dict]:
+    """
+    Charge les CSV d'actigraphie et agrege par jour.
+
+    A partir de l'activite par minute, on derive :
+      - activity_mean    : activite moyenne du jour (proxy pas/step_count)
+      - activity_std     : variabilite de l'activite (proxy HRV)
+      - night_activity   : activite nocturne 23h-7h (proxy inverse de qualite sommeil)
+      - sleep_proxy_min  : minutes avec activite=0 la nuit (proxy duree sommeil)
+      - day_activity     : activite diurne 8h-22h (proxy mobilite/gps)
+      - screen_proxy     : minutes avec faible activite diurne (proxy screen_time)
+      - peak_hour_ratio  : ratio activite matin/apres-midi (proxy rythme circadien)
+      - active_minutes   : minutes avec activite > 0 (proxy appels/interactions)
+    """
+    print("[2/9] Chargement et agregation de l'actigraphie par jour...")
+
+    import csv
+    all_rows = []
+    patients_loaded = 0
+
+    for pid, info in madrs_scores.items():
+        group = info["group"]
+        csv_path = DATA_DIR / group / f"{pid}.csv"
+        if not csv_path.exists():
+            print(f"  WARN: {csv_path} introuvable, skip")
+            continue
+
+        # Lire les donnees par minute
+        daily = defaultdict(list)
+        with open(csv_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                ts = row.get("timestamp", "")
+                activity = row.get("activity", "0")
+                if not ts or activity in ("", "NA"):
+                    continue
+                try:
+                    dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+                    act_val = float(activity)
+                except (ValueError, TypeError):
+                    continue
+                daily[dt.date()].append((dt.hour, act_val))
+
+        # Agreger par jour
+        for day_date, minutes in sorted(daily.items()):
+            if len(minutes) < 600:  # au moins 10h de donnees
+                continue
+
+            hours = [m[0] for m in minutes]
+            activities = [m[1] for m in minutes]
+
+            # Activite globale
+            activity_mean = np.mean(activities)
+            activity_std = np.std(activities) if len(activities) > 1 else 0.0
+
+            # Nuit (23h-7h) : proxy sommeil
+            night_acts = [a for h, a in minutes if h >= NIGHT_START or h < NIGHT_END]
+            night_activity = np.mean(night_acts) if night_acts else 0.0
+            sleep_proxy_min = sum(1 for a in night_acts if a == 0)  # minutes immobiles la nuit
+
+            # Jour (8h-22h) : proxy mobilite
+            day_acts = [a for h, a in minutes if NIGHT_END <= h < NIGHT_START]
+            day_activity = np.mean(day_acts) if day_acts else 0.0
+
+            # Screen proxy : minutes avec faible activite diurne (<50)
+            screen_proxy = sum(1 for a in day_acts if 0 < a < 50)
+
+            # Rythme circadien : matin (6-12) vs apres-midi (12-18)
+            morning = [a for h, a in minutes if 6 <= h < 12]
+            afternoon = [a for h, a in minutes if 12 <= h < 18]
+            morning_avg = np.mean(morning) if morning else 0.0
+            afternoon_avg = np.mean(afternoon) if afternoon else 1.0
+            peak_ratio = morning_avg / max(afternoon_avg, 1.0)
+
+            # Minutes actives (proxy interactions sociales)
+            active_minutes = sum(1 for a in activities if a > 0)
+
+            all_rows.append({
+                "patient_id": pid,
+                "date": day_date,
+                "group": info["group"],
+                "madrs1": info["madrs1"],
+                "madrs2": info["madrs2"],
+                # Metriques agregees
+                "activity_mean": round(activity_mean, 2),
+                "activity_std": round(activity_std, 2),
+                "night_activity": round(night_activity, 2),
+                "sleep_proxy_min": sleep_proxy_min,
+                "day_activity": round(day_activity, 2),
+                "screen_proxy": screen_proxy,
+                "peak_ratio": round(peak_ratio, 4),
+                "active_minutes": active_minutes,
+            })
+
+        patients_loaded += 1
+
+    print(f"  -> {patients_loaded} patients charges, {len(all_rows)} jours-patients")
+    return all_rows
+
+
+# ---------------------------------------------------------------------------
+# 3. Mapper les metriques vers le schema pipeline
+# ---------------------------------------------------------------------------
+
+def map_to_pipeline_metrics(rows: list[dict]) -> list[dict]:
+    """
+    Mappe les metriques d'actigraphie vers les colonnes du pipeline.
+
+    Mapping :
+      activity_mean   -> step_count (proxy : mouvement general)
+      activity_std    -> heart_rate_variability (proxy : variabilite physiologique)
+      night_activity  -> heart_rate_avg (proxy inverse : agitation nocturne)
+      sleep_proxy_min -> sleep_duration_min
+      day_activity    -> gps_radius_km (proxy : mobilite exterieure)
+      screen_proxy    -> screen_time_min (proxy : sedentarite diurne)
+      peak_ratio      -> sleep_quality_score (proxy : rythme circadien regulier)
+      active_minutes  -> call_count (proxy : engagement social)
+    """
+    print("[3/9] Mapping des metriques vers le schema pipeline...")
+
+    mapped = []
+    for row in rows:
+        mapped.append({
+            "patient_id": row["patient_id"],
+            "date": row["date"],
+            "group": row["group"],
+            "madrs1": row["madrs1"],
+            "madrs2": row["madrs2"],
+            # Metriques mappees
+            "heart_rate_avg": row["night_activity"],     # agitation nocturne -> HR eleve = stress
+            "heart_rate_variability": row["activity_std"],
+            "sleep_duration_min": row["sleep_proxy_min"],
+            "sleep_quality_score": row["peak_ratio"] * 10,  # normalise 0-10
+            "step_count": row["activity_mean"],
+            "gps_radius_km": row["day_activity"] / 100,     # normalise en km
+            "screen_time_min": row["screen_proxy"],
+            "call_count": row["active_minutes"] / 60,       # normalise en heures
+        })
+
+    print(f"  -> {len(mapped)} lignes mappees")
+    return mapped
+
+
+# ---------------------------------------------------------------------------
+# 4. Calculer les baselines par patient
 # ---------------------------------------------------------------------------
 
 def compute_baselines(rows: list[dict]) -> dict:
-    """Calcule mean/std pour chaque metrique sur les 7 premiers jours."""
-    print("[2/9] Calcul des baselines (jours 1-7)...")
+    """Calcule mean/std pour chaque metrique sur toutes les donnees du patient."""
+    print("[4/9] Calcul des baselines par patient...")
 
-    metrics = ["heart_rate_avg", "sleep_duration_min", "step_count",
-               "gps_radius_km", "screen_time_min"]
-    patients = sorted(set(r["patiente"] for r in rows))
+    metrics = ["heart_rate_avg", "heart_rate_variability", "sleep_duration_min",
+               "sleep_quality_score", "step_count", "gps_radius_km",
+               "screen_time_min", "call_count"]
+
+    patients = sorted(set(r["patient_id"] for r in rows))
     baselines = {}
 
     for patient in patients:
-        baseline_rows = [r for r in rows if r["patiente"] == patient and r["jour"] <= BASELINE_DAYS]
+        patient_rows = [r for r in rows if r["patient_id"] == patient]
         baselines[patient] = {}
         for metric in metrics:
-            values = [r[metric] for r in baseline_rows]
+            values = [r[metric] for r in patient_rows if r[metric] is not None]
+            if len(values) < 2:
+                baselines[patient][metric] = {"mean": 0.0, "std": 1e-6}
+                continue
             m = mean(values)
-            s = stdev(values) if len(values) > 1 else 1e-6
-            s = max(s, 1e-6)  # eviter division par zero
+            s = stdev(values)
+            s = max(s, 1e-6)
             baselines[patient][metric] = {"mean": m, "std": s}
 
-    for patient in patients:
-        print(f"  {patient}:")
-        for metric, stats in baselines[patient].items():
-            print(f"    {metric:25s} mean={stats['mean']:8.2f}  std={stats['std']:6.2f}")
-
+    print(f"  -> Baselines calculees pour {len(patients)} patients")
     return baselines
 
 
 # ---------------------------------------------------------------------------
-# 3. Calculer les Z-scores
+# 5. Calculer les Z-scores et features
 # ---------------------------------------------------------------------------
 
-def compute_zscores(rows: list[dict], baselines: dict) -> list[dict]:
-    """Calcule les Z-scores pour chaque jour de chaque patiente."""
-    print("[3/9] Calcul des Z-scores...")
+METRIC_TO_ZSCORE = {
+    "heart_rate_avg":           "z_heart_rate",
+    "heart_rate_variability":   "z_hrv",
+    "sleep_duration_min":       "z_sleep_duration",
+    "sleep_quality_score":      "z_sleep_quality",
+    "step_count":               "z_step_count",
+    "gps_radius_km":            "z_gps_radius",
+    "screen_time_min":          "z_screen_time",
+    "call_count":               "z_call_frequency",
+}
+
+
+def compute_features(rows: list[dict], baselines: dict) -> list[dict]:
+    """Calcule Z-scores + is_weekend pour chaque jour."""
+    print("[5/9] Calcul des Z-scores et features...")
 
     enriched = []
     for row in rows:
-        patient = row["patiente"]
-        bl = baselines[patient]
+        pid = row["patient_id"]
+        bl = baselines[pid]
         features = {}
 
-        for metric, z_name in ZSCORE_NAMES.items():
+        for metric, z_name in METRIC_TO_ZSCORE.items():
             val = row[metric]
             m = bl[metric]["mean"]
             s = bl[metric]["std"]
             z = (val - m) / s
             features[z_name] = round(z, 4)
 
-        # Features que le pipeline genere mais que le simulateur n'a pas
-        # -> on les derive des donnees existantes avec du bruit realiste
-        # z_hrv : correle negativement avec heart_rate (quand HR monte, HRV baisse)
-        features["z_hrv"] = round(-features["z_heart_rate"] * 0.8 + np.random.normal(0, 0.3), 4)
-        # z_sleep_quality : correle avec sleep_duration (mauvais sommeil = courte duree)
-        features["z_sleep_quality"] = round(features["z_sleep_duration"] * 0.7 + np.random.normal(0, 0.2), 4)
-        # z_call_frequency : diminue en rechute (isolation sociale), correle avec step_count
-        features["z_call_frequency"] = round(features["z_step_count"] * 0.5 + np.random.normal(0, 0.3), 4)
-
         features["trend_7d"] = 0.0
         features["trend_14d"] = 0.0
-        features["is_weekend"] = 1.0 if date.fromisoformat(row["date"]).weekday() >= 5 else 0.0
+        features["is_weekend"] = 1.0 if row["date"].weekday() >= 5 else 0.0
 
         enriched.append({
-            "patiente": patient,
-            "jour": row["jour"],
+            "patient_id": pid,
             "date": row["date"],
+            "group": row["group"],
+            "madrs1": row["madrs1"],
+            "madrs2": row["madrs2"],
             "features": features,
         })
 
@@ -186,35 +331,100 @@ def compute_zscores(rows: list[dict], baselines: dict) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# 4. Calculer les tendances (trend_7d, trend_14d)
+# 6. Generer les labels : MADRS -> score 0-100
 # ---------------------------------------------------------------------------
 
-def add_trends(enriched: list[dict], labels: dict):
-    """Ajoute les tendances 7j et 14j basees sur les scores precedents."""
-    print("[4/9] Calcul des tendances 7j/14j...")
+def generate_labels(enriched: list[dict]) -> dict:
+    """
+    Convertit MADRS (0-60) en score de risque (0-100).
 
-    patients = sorted(set(r["patiente"] for r in enriched))
+    MADRS :
+      0-6   : normal          -> score 0-15
+      7-19  : depression legere -> score 15-40
+      20-34 : depression moderee -> score 40-70
+      35-60 : depression severe  -> score 70-100
+
+    Pour les controles (MADRS=0) : score bas avec variation naturelle.
+    Pour les patients : interpolation MADRS1 -> MADRS2 sur les jours.
+    """
+    print("[6/9] Generation des labels (MADRS -> score 0-100)...")
+
+    def madrs_to_score(madrs: float) -> float:
+        """Conversion non-lineaire MADRS -> score 0-100."""
+        if madrs <= 6:
+            return (madrs / 6.0) * 15.0
+        elif madrs <= 19:
+            return 15.0 + ((madrs - 6.0) / 13.0) * 25.0
+        elif madrs <= 34:
+            return 40.0 + ((madrs - 19.0) / 15.0) * 30.0
+        else:
+            return 70.0 + ((madrs - 34.0) / 26.0) * 30.0
+
+    labels = {}
+    patients = sorted(set(r["patient_id"] for r in enriched))
 
     for patient in patients:
         patient_rows = sorted(
-            [r for r in enriched if r["patiente"] == patient],
-            key=lambda x: x["jour"]
+            [r for r in enriched if r["patient_id"] == patient],
+            key=lambda x: x["date"]
+        )
+        n_days = len(patient_rows)
+        madrs1 = patient_rows[0]["madrs1"]
+        madrs2 = patient_rows[0]["madrs2"]
+
+        for i, row in enumerate(patient_rows):
+            # Interpolation lineaire entre MADRS debut et fin
+            t = i / max(n_days - 1, 1)
+            madrs_interp = madrs1 + (madrs2 - madrs1) * t
+
+            # Convertir en score 0-100
+            base_score = madrs_to_score(madrs_interp)
+
+            # Ajouter variation quotidienne realiste (+/- 5)
+            noise = np.random.normal(0, 3)
+            score = np.clip(base_score + noise, 0, 100)
+
+            labels[(patient, row["date"])] = round(float(score), 2)
+
+    # Resume par groupe
+    cond_scores = [v for k, v in labels.items() if k[0].startswith("condition")]
+    ctrl_scores = [v for k, v in labels.items() if k[0].startswith("control")]
+    print(f"  -> Condition : mean={np.mean(cond_scores):.1f}, "
+          f"range=[{np.min(cond_scores):.0f}, {np.max(cond_scores):.0f}]")
+    print(f"  -> Control   : mean={np.mean(ctrl_scores):.1f}, "
+          f"range=[{np.min(ctrl_scores):.0f}, {np.max(ctrl_scores):.0f}]")
+
+    return labels
+
+
+# ---------------------------------------------------------------------------
+# 7. Ajouter les tendances
+# ---------------------------------------------------------------------------
+
+def add_trends(enriched: list[dict], labels: dict):
+    """Ajoute trend_7d et trend_14d bases sur l'evolution des scores."""
+    print("[7/9] Calcul des tendances 7j/14j...")
+
+    patients = sorted(set(r["patient_id"] for r in enriched))
+
+    for patient in patients:
+        patient_rows = sorted(
+            [r for r in enriched if r["patient_id"] == patient],
+            key=lambda x: x["date"]
         )
         scores_so_far = []
         for row in patient_rows:
-            key = (patient, row["jour"])
+            key = (patient, row["date"])
             score = labels.get(key, 0.0)
             scores_so_far.append(score)
 
             if len(scores_so_far) >= 2:
-                # trend_7d
                 window_7 = scores_so_far[-min(7, len(scores_so_far)):]
                 if len(window_7) >= 2:
                     x = np.arange(len(window_7))
                     slope = np.polyfit(x, window_7, 1)[0]
                     row["features"]["trend_7d"] = round(float(slope), 4)
 
-                # trend_14d
                 window_14 = scores_so_far[-min(14, len(scores_so_far)):]
                 if len(window_14) >= 2:
                     x = np.arange(len(window_14))
@@ -223,78 +433,23 @@ def add_trends(enriched: list[dict], labels: dict):
 
 
 # ---------------------------------------------------------------------------
-# 5. Generer les labels de risque
-# ---------------------------------------------------------------------------
-
-def generate_labels(rows: list[dict]) -> dict:
-    """
-    Genere un score de risque (0-100) pour chaque jour.
-
-    Strategie :
-      - Jours 1-7 (baseline) : score bas 5-25 (profil sain)
-      - Jours 8-14 (debut rechute) : montee progressive 25-55
-      - Jours 15-21 (rechute avancee) : score eleve 55-90
-    """
-    print("[5/9] Generation des labels de risque...")
-
-    labels = {}
-    patients = sorted(set(r["patiente"] for r in rows))
-
-    for patient in patients:
-        patient_rows = [r for r in rows if r["patiente"] == patient]
-        for row in patient_rows:
-            jour = row["jour"]
-
-            if jour <= 7:
-                # Baseline : score bas avec un peu de variation
-                base = 10 + (jour - 1) * 2
-                noise = np.random.uniform(-3, 3)
-                score = max(2.0, min(35.0, base + noise))
-            elif jour <= 14:
-                # Transition : montee progressive
-                t = (jour - 8) / 6.0  # 0 -> 1
-                base = 25 + t * 30
-                noise = np.random.uniform(-4, 4)
-                score = max(20.0, min(65.0, base + noise))
-            else:
-                # Rechute : score eleve
-                t = (jour - 15) / 6.0  # 0 -> 1
-                base = 55 + t * 30
-                noise = np.random.uniform(-5, 5)
-                score = max(45.0, min(95.0, base + noise))
-
-            labels[(patient, jour)] = round(score, 2)
-
-    # Resume
-    for patient in patients:
-        scores_bl = [labels[(patient, j)] for j in range(1, 8)]
-        scores_re = [labels[(patient, j)] for j in range(15, 22)]
-        print(f"  {patient}: baseline avg={mean(scores_bl):.1f}, "
-              f"rechute avg={mean(scores_re):.1f}")
-
-    return labels
-
-
-# ---------------------------------------------------------------------------
-# 6. Construire X, y pour l'entrainement
+# 8. Construire dataset et entrainer
 # ---------------------------------------------------------------------------
 
 def build_dataset(enriched: list[dict], labels: dict):
-    """Construit les matrices X et y pour XGBoost."""
-    print("[6/9] Construction du dataset X, y...")
+    """Construit les matrices X, y."""
+    print("[8/9] Construction du dataset et entrainement...")
 
-    feature_names = sorted(enriched[0]["features"].keys())
+    feature_names = PIPELINE_FEATURES
     X = []
     y = []
-    meta = []
 
     for row in enriched:
-        key = (row["patiente"], row["jour"])
+        key = (row["patient_id"], row["date"])
         if key in labels:
             x_row = [row["features"].get(f, 0.0) for f in feature_names]
             X.append(x_row)
             y.append(labels[key])
-            meta.append(key)
 
     X = np.array(X, dtype=np.float64)
     y = np.array(y, dtype=np.float64)
@@ -303,27 +458,20 @@ def build_dataset(enriched: list[dict], labels: dict):
     print(f"  -> Features: {feature_names}")
     print(f"  -> y range: [{y.min():.1f}, {y.max():.1f}], mean={y.mean():.1f}")
 
-    return X, y, feature_names, meta
+    return X, y, feature_names
 
-
-# ---------------------------------------------------------------------------
-# 7. Entrainer XGBoost avec cross-validation
-# ---------------------------------------------------------------------------
 
 def train_xgboost(X, y, feature_names):
     """Entraine un XGBRegressor avec 5-fold CV."""
-    print("[7/9] Entrainement XGBoost...")
-
     try:
         import xgboost as xgb
-        from sklearn.model_selection import cross_val_score, KFold
+        from sklearn.model_selection import KFold
         from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
     except ImportError as e:
         print(f"  ERREUR : {e}")
         print("  Installez : pip install xgboost scikit-learn")
         sys.exit(1)
 
-    # Hyperparametres
     params = {
         "n_estimators": 200,
         "max_depth": 4,
@@ -340,30 +488,27 @@ def train_xgboost(X, y, feature_names):
 
     # Cross-validation 5-fold
     kf = KFold(n_splits=5, shuffle=True, random_state=42)
-    cv_scores_rmse = []
-    cv_scores_mae = []
+    cv_rmse = []
+    cv_mae = []
 
-    print("  Cross-validation 5-fold :")
+    print("\n  Cross-validation 5-fold :")
     for fold, (train_idx, val_idx) in enumerate(kf.split(X), 1):
-        X_train, X_val = X[train_idx], X[val_idx]
-        y_train, y_val = y[train_idx], y[val_idx]
+        X_tr, X_val = X[train_idx], X[val_idx]
+        y_tr, y_val = y[train_idx], y[val_idx]
 
-        model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
-
-        y_pred = model.predict(X_val)
-        y_pred = np.clip(y_pred, 0, 100)
+        model.fit(X_tr, y_tr, eval_set=[(X_val, y_val)], verbose=False)
+        y_pred = np.clip(model.predict(X_val), 0, 100)
 
         rmse = np.sqrt(mean_squared_error(y_val, y_pred))
         mae = mean_absolute_error(y_val, y_pred)
-        cv_scores_rmse.append(rmse)
-        cv_scores_mae.append(mae)
+        cv_rmse.append(rmse)
+        cv_mae.append(mae)
         print(f"    Fold {fold}: RMSE={rmse:.2f}, MAE={mae:.2f}")
 
-    print(f"  -> CV RMSE: {np.mean(cv_scores_rmse):.2f} (+/- {np.std(cv_scores_rmse):.2f})")
-    print(f"  -> CV MAE:  {np.mean(cv_scores_mae):.2f} (+/- {np.std(cv_scores_mae):.2f})")
+    print(f"  -> CV RMSE: {np.mean(cv_rmse):.2f} (+/- {np.std(cv_rmse):.2f})")
+    print(f"  -> CV MAE:  {np.mean(cv_mae):.2f} (+/- {np.std(cv_mae):.2f})")
 
-    # Entrainer le modele final sur toutes les donnees
-    print("  Entrainement final sur toutes les donnees...")
+    # Modele final
     model.fit(X, y, verbose=False)
     y_pred_all = np.clip(model.predict(X), 0, 100)
 
@@ -381,7 +526,7 @@ def train_xgboost(X, y, feature_names):
         bar = "#" * int(importances[i] * 40)
         print(f"    {feature_names[i]:20s} {importances[i]:.4f}  {bar}")
 
-    # Classification en 4 niveaux
+    # Classification 4 niveaux
     y_class_true = [classify_risk(s) for s in y]
     y_class_pred = [classify_risk(s) for s in y_pred_all]
     accuracy = sum(t == p for t, p in zip(y_class_true, y_class_pred)) / len(y)
@@ -403,9 +548,11 @@ def train_xgboost(X, y, feature_names):
         print()
 
     metrics = {
-        "cv_rmse_mean": round(float(np.mean(cv_scores_rmse)), 4),
-        "cv_rmse_std": round(float(np.std(cv_scores_rmse)), 4),
-        "cv_mae_mean": round(float(np.mean(cv_scores_mae)), 4),
+        "dataset": "Depresjon (Simula Research Lab)",
+        "dataset_url": "https://datasets.simula.no/depresjon/",
+        "cv_rmse_mean": round(float(np.mean(cv_rmse)), 4),
+        "cv_rmse_std": round(float(np.std(cv_rmse)), 4),
+        "cv_mae_mean": round(float(np.mean(cv_mae)), 4),
         "final_rmse": round(float(rmse_final), 4),
         "final_mae": round(float(mae_final), 4),
         "final_r2": round(float(r2_final), 4),
@@ -416,6 +563,7 @@ def train_xgboost(X, y, feature_names):
         "feature_importances": {feature_names[i]: round(float(importances[i]), 4)
                                 for i in sorted_idx},
         "hyperparameters": params,
+        "label_source": "MADRS scores (clinician-rated)",
         "trained_at": datetime.now().isoformat(),
     }
 
@@ -423,13 +571,12 @@ def train_xgboost(X, y, feature_names):
 
 
 # ---------------------------------------------------------------------------
-# 8. Sauvegarder le modele
+# 9. Sauvegarde + comparaison heuristique
 # ---------------------------------------------------------------------------
 
 def save_model(model, metrics):
-    """Sauvegarde le modele XGBoost et les metriques."""
-    print("[8/9] Sauvegarde du modele...")
-
+    """Sauvegarde le modele et les metriques."""
+    print("[9/9] Sauvegarde du modele...")
     MODEL_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     model.save_model(str(MODEL_OUTPUT))
     print(f"  -> Modele: {MODEL_OUTPUT}")
@@ -439,69 +586,44 @@ def save_model(model, metrics):
     print(f"  -> Metriques: {METRICS_OUTPUT}")
 
 
-# ---------------------------------------------------------------------------
-# 9. Comparaison avec le modele heuristique
-# ---------------------------------------------------------------------------
-
 def compare_with_heuristic(enriched, labels):
-    """Compare les scores heuristiques avec les labels reels."""
-    print("[9/9] Comparaison heuristique vs labels...")
+    """Compare le heuristique avec les labels."""
+    print("\n  Comparaison avec le modele heuristique :")
 
     WEIGHTS = {
-        "z_sleep_duration": 0.20,
-        "z_sleep_quality": 0.15,
-        "z_heart_rate": 0.15,
-        "z_hrv": 0.15,
-        "z_step_count": 0.10,
-        "z_gps_radius": 0.10,
-        "z_screen_time": 0.10,
-        "z_call_frequency": 0.05,
+        "z_sleep_duration": 0.20, "z_sleep_quality": 0.15,
+        "z_heart_rate": 0.15, "z_hrv": 0.15,
+        "z_step_count": 0.10, "z_gps_radius": 0.10,
+        "z_screen_time": 0.10, "z_call_frequency": 0.05,
     }
 
-    heuristic_scores = []
-    true_scores = []
-
+    h_scores, t_scores = [], []
     for row in enriched:
-        key = (row["patiente"], row["jour"])
+        key = (row["patient_id"], row["date"])
         if key not in labels:
             continue
 
         fv = row["features"]
-        weighted_sum = 0.0
-        total_weight = 0.0
+        ws = sum(abs(fv.get(z, 0)) * w for z, w in WEIGHTS.items())
+        tw = sum(WEIGHTS.values())
+        maz = ws / tw
+        score = 100.0 / (1.0 + math.exp(-1.2 * (maz - 1.5)))
 
-        for z_name, weight in WEIGHTS.items():
-            z_val = fv.get(z_name)
-            if z_val is not None:
-                weighted_sum += abs(z_val) * weight
-                total_weight += weight
-
-        if total_weight > 0:
-            mean_abs_z = weighted_sum / total_weight
-            score = 100.0 / (1.0 + math.exp(-1.2 * (mean_abs_z - 1.5)))
-        else:
-            score = 50.0
-
-        heuristic_scores.append(score)
-        true_scores.append(labels[key])
-
-    h = np.array(heuristic_scores)
-    t = np.array(true_scores)
+        h_scores.append(score)
+        t_scores.append(labels[key])
 
     from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+    h, t = np.array(h_scores), np.array(t_scores)
     rmse_h = np.sqrt(mean_squared_error(t, h))
-    mae_h = mean_absolute_error(t, h)
     r2_h = r2_score(t, h)
-
-    print(f"  Heuristique: RMSE={rmse_h:.2f}, MAE={mae_h:.2f}, R2={r2_h:.4f}")
 
     h_class = [classify_risk(s) for s in h]
     t_class = [classify_risk(s) for s in t]
     acc_h = sum(a == b for a, b in zip(h_class, t_class)) / len(t_class)
-    print(f"  Heuristique accuracy (4 niveaux): {acc_h:.1%}")
 
-    return {"rmse": round(float(rmse_h), 4), "mae": round(float(mae_h), 4),
-            "r2": round(float(r2_h), 4), "accuracy": round(float(acc_h), 4)}
+    print(f"  Heuristique: RMSE={rmse_h:.2f}, R2={r2_h:.4f}, Accuracy={acc_h:.1%}")
+    return {"rmse": round(float(rmse_h), 4), "r2": round(float(r2_h), 4),
+            "accuracy": round(float(acc_h), 4)}
 
 
 # ---------------------------------------------------------------------------
@@ -510,45 +632,52 @@ def compare_with_heuristic(enriched, labels):
 
 def main():
     print("=" * 70)
-    print("  MOOD-IOT : Entrainement XGBoost Risk Scoring Model")
+    print("  MOOD-IOT : Entrainement XGBoost — Dataset Depresjon (clinique)")
     print("=" * 70)
     print()
 
     np.random.seed(42)
 
+    # Verifier que le dataset existe
+    if not DATA_DIR.exists():
+        print(f"ERREUR: Dataset non trouve dans {DATA_DIR}")
+        print("Telechargez-le : kaggle datasets download -d arashnic/the-depression-dataset")
+        sys.exit(1)
+
     # Pipeline
-    rows = load_simulator_data()
-    baselines = compute_baselines(rows)
-    labels = generate_labels(rows)
-    enriched = compute_zscores(rows, baselines)
+    madrs = load_madrs_scores()
+    rows = load_and_aggregate_actigraphy(madrs)
+    mapped = map_to_pipeline_metrics(rows)
+    baselines = compute_baselines(mapped)
+    enriched = compute_features(mapped, baselines)
+    labels = generate_labels(enriched)
     add_trends(enriched, labels)
-    X, y, feature_names, meta = build_dataset(enriched, labels)
+    X, y, feature_names = build_dataset(enriched, labels)
     model, metrics = train_xgboost(X, y, feature_names)
     save_model(model, metrics)
 
-    print()
     heuristic_metrics = compare_with_heuristic(enriched, labels)
 
-    # Resume final
+    # Resume
     print()
     print("=" * 70)
     print("  RESUME")
     print("=" * 70)
-    print(f"  XGBoost  -> RMSE={metrics['final_rmse']:.2f}, "
+    print(f"  Dataset   : Depresjon (55 patients, donnees cliniques reelles)")
+    print(f"  Samples   : {metrics['n_samples']}")
+    print(f"  XGBoost   -> CV RMSE={metrics['cv_rmse_mean']:.2f}, "
           f"R2={metrics['final_r2']:.4f}, "
           f"Accuracy={metrics['classification_accuracy']:.1%}")
-    print(f"  Heurist. -> RMSE={heuristic_metrics['rmse']:.2f}, "
+    print(f"  Heurist.  -> RMSE={heuristic_metrics['rmse']:.2f}, "
           f"R2={heuristic_metrics['r2']:.4f}, "
           f"Accuracy={heuristic_metrics['accuracy']:.1%}")
 
-    if metrics['final_rmse'] < heuristic_metrics['rmse']:
-        improvement = (1 - metrics['final_rmse'] / heuristic_metrics['rmse']) * 100
-        print(f"\n  XGBoost gagne : {improvement:.1f}% meilleur que l'heuristique")
+    if metrics['cv_rmse_mean'] < heuristic_metrics['rmse']:
+        print(f"\n  XGBoost gagne sur la cross-validation!")
     else:
-        print(f"\n  L'heuristique est meilleur. Verifier les donnees d'entrainement.")
+        print(f"\n  L'heuristique performe mieux. Considerer le mode hybride.")
 
-    print(f"\n  Modele sauvegarde dans : {MODEL_OUTPUT}")
-    print(f"  Le pipeline le chargera automatiquement au prochain demarrage.")
+    print(f"\n  Modele sauvegarde: {MODEL_OUTPUT}")
     print("=" * 70)
 
 
