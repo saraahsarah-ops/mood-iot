@@ -23,6 +23,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Code source
 COPY src/ ./src/
 
+# Modele ML (XGBoost) si disponible
+COPY models/ ./models/
+
 # Argument pour sélectionner le microservice
 ARG SERVICE_NAME=gateway
 ENV SERVICE_NAME=${SERVICE_NAME}

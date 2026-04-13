@@ -1,0 +1,49 @@
+{
+  "cv_rmse_mean": 6.7469,
+  "cv_rmse_std": 1.1696,
+  "cv_mae_mean": 5.2161,
+  "final_rmse": 0.4384,
+  "final_mae": 0.3161,
+  "final_r2": 0.9997,
+  "classification_accuracy": 1.0,
+  "n_samples": 84,
+  "n_features": 11,
+  "feature_names": [
+    "is_weekend",
+    "trend_14d",
+    "trend_7d",
+    "z_call_frequency",
+    "z_gps_radius",
+    "z_heart_rate",
+    "z_hrv",
+    "z_screen_time",
+    "z_sleep_duration",
+    "z_sleep_quality",
+    "z_step_count"
+  ],
+  "feature_importances": {
+    "z_step_count": 0.6202,
+    "z_screen_time": 0.1956,
+    "z_call_frequency": 0.0622,
+    "trend_14d": 0.0523,
+    "trend_7d": 0.021,
+    "z_heart_rate": 0.0187,
+    "z_hrv": 0.0083,
+    "z_gps_radius": 0.0078,
+    "z_sleep_quality": 0.0059,
+    "z_sleep_duration": 0.0056,
+    "is_weekend": 0.0024
+  },
+  "hyperparameters": {
+    "n_estimators": 200,
+    "max_depth": 4,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_alpha": 0.1,
+    "reg_lambda": 1.0,
+    "objective": "reg:squarederror",
+    "random_state": 42
+  },
+  "trained_at": "2026-04-12T18:07:00.451807"
+}
