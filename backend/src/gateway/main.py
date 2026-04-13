@@ -80,6 +80,8 @@ async def _proxy(request: Request, service: str, path: str):
             content={"detail": f"Service inconnu: {service}"},
         )
 
+    # Remove trailing slash to avoid 307 redirects
+    path = path.rstrip("/")
     target_url = f"{base_url}/{path}"
 
     # Forward query params
