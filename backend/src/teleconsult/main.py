@@ -148,8 +148,28 @@ def _generate_jitsi_url(room_name: str) -> str:
 
 
 def _generate_jitsi_jwt(room_name: str, user_id: str, role: str) -> str:
-    """Generate a JWT token for Jitsi authentication. TODO: use real JWT signing."""
-    return f"placeholder-jitsi-jwt-{room_name}-{user_id}"
+    """Generate a JWT token for Jitsi authentication."""
+    import time
+    from jose import jwt as jose_jwt
+
+    now = int(time.time())
+    payload = {
+        "aud": "jitsi",
+        "iss": settings.JITSI_APP_ID,
+        "sub": settings.JITSI_SERVER_URL.replace("https://", ""),
+        "room": room_name,
+        "exp": now + 7200,  # 2 heures
+        "iat": now,
+        "context": {
+            "user": {
+                "id": user_id,
+                "name": user_id,
+                "affiliation": "owner" if role == "psychiatre" else "member",
+            },
+        },
+        "moderator": role == "psychiatre",
+    }
+    return jose_jwt.encode(payload, settings.JITSI_JWT_SECRET, algorithm="HS256")
 
 
 def _session_to_response(s: TeleconsultSession) -> SessionResponse:

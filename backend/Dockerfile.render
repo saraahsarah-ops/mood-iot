@@ -1,0 +1,18 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Dependances systeme pour psycopg2 et les libs ML
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc libpq-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY src/ src/
+
+EXPOSE 8000
+
+# Render injecte la variable PORT automatiquement
+CMD ["sh", "-c", "uvicorn src.app_unified:app --host 0.0.0.0 --port ${PORT:-8000}"]

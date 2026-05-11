@@ -12,7 +12,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Depends, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from sqlalchemy import select, and_, func, Date, cast
+from sqlalchemy import select, and_, func, delete, Date, cast
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -30,8 +30,12 @@ from src.shared.models import (
     ConsentType,
     Baseline,
     DailyAggregate,
+    FeatureVector,
+    RiskScore,
+    Notification,
     User,
 )
+from src.shared.audit import log_action
 
 logger = logging.getLogger("mood_iot.patient")
 
@@ -391,7 +395,6 @@ async def get_patient(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acces refuse")
 
     # Audit log
-    from src.shared.audit import log_action
     await log_action(
         db,
         user_id=current_user.get("user_id"),
@@ -902,6 +905,296 @@ async def get_patient_metrics(
         )
 
     return MetricsResponse(patient_id=patient_id, baselines=baselines)
+
+
+# ---------------------------------------------------------------------------
+# Endpoints - RGPD (Donnees personnelles)
+# ---------------------------------------------------------------------------
+
+
+class RGPDConsentUpdate(BaseModel):
+    """Mise a jour d'un consentement unique (RGPD)."""
+    consent_type: str = Field(..., description="Type de consentement (data_collection, data_sharing, research, notifications)")
+    granted: bool
+
+
+class RGPDConsentResponse(BaseModel):
+    patient_id: str
+    consent_type: str
+    granted: bool
+    updated_at: str
+
+
+@app.get("/patients/{patient_id}/data-export")
+async def rgpd_data_export(
+    patient_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_role("psychiatre", "admin")),
+):
+    """
+    RGPD Article 20 — Portabilite des donnees.
+    Exporte toutes les donnees d'un patient au format JSON.
+    """
+    # Verify patient exists
+    result = await db.execute(select(Patient).where(Patient.id == patient_id))
+    patient = result.scalar_one_or_none()
+    if patient is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient introuvable")
+
+    # Patient info
+    patient_data = {
+        "id": str(patient.id),
+        "first_name": patient.first_name,
+        "last_name": patient.last_name,
+        "date_of_birth": str(patient.date_of_birth) if patient.date_of_birth else None,
+        "gender": patient.gender.value if hasattr(patient.gender, "value") else str(patient.gender) if patient.gender else None,
+        "diagnosis": patient.diagnosis,
+        "emergency_contact_phone": patient.emergency_contact_phone,
+        "baseline_status": patient.baseline_status.value if hasattr(patient.baseline_status, "value") else str(patient.baseline_status),
+        "created_at": patient.created_at.isoformat() if patient.created_at else None,
+        "updated_at": patient.updated_at.isoformat() if patient.updated_at else None,
+    }
+
+    # Daily aggregates
+    agg_result = await db.execute(
+        select(DailyAggregate).where(DailyAggregate.patient_id == patient_id).order_by(DailyAggregate.date.desc())
+    )
+    aggregates = agg_result.scalars().all()
+    daily_aggregates_data = [
+        {
+            "id": str(a.id),
+            "date": str(a.date),
+            "heart_rate_avg": a.heart_rate_avg,
+            "heart_rate_variability": a.heart_rate_variability,
+            "sleep_duration_min": a.sleep_duration_min,
+            "sleep_quality_score": a.sleep_quality_score,
+            "step_count": a.step_count,
+            "gps_radius_km": a.gps_radius_km,
+            "screen_time_min": a.screen_time_min,
+            "call_count": a.call_count,
+            "call_duration_min": a.call_duration_min,
+            "source_platform": a.source_platform,
+        }
+        for a in aggregates
+    ]
+
+    # Risk scores
+    rs_result = await db.execute(
+        select(RiskScore).where(RiskScore.patient_id == patient_id).order_by(RiskScore.date.desc())
+    )
+    risk_scores_data = [
+        {
+            "id": str(r.id),
+            "date": str(r.date),
+            "score": r.score,
+            "alert_level": r.alert_level,
+            "model_version": r.model_version,
+            "confidence": r.confidence,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rs_result.scalars().all()
+    ]
+
+    # Notifications
+    notif_result = await db.execute(
+        select(Notification).where(Notification.patient_id == patient_id).order_by(Notification.created_at.desc())
+    )
+    notifications_data = [
+        {
+            "id": str(n.id),
+            "type": n.type.value if hasattr(n.type, "value") else str(n.type),
+            "level": n.level,
+            "title": n.title,
+            "body": n.body,
+            "status": n.status.value if hasattr(n.status, "value") else str(n.status),
+            "created_at": n.created_at.isoformat() if n.created_at else None,
+        }
+        for n in notif_result.scalars().all()
+    ]
+
+    # Consents
+    consent_result = await db.execute(
+        select(Consent).where(Consent.patient_id == patient_id)
+    )
+    consents_data = [
+        {
+            "consent_type": c.consent_type.value if hasattr(c.consent_type, "value") else str(c.consent_type),
+            "is_granted": c.is_granted,
+            "granted_at": c.granted_at.isoformat() if c.granted_at else None,
+            "revoked_at": c.revoked_at.isoformat() if c.revoked_at else None,
+        }
+        for c in consent_result.scalars().all()
+    ]
+
+    # Baselines
+    bl_result = await db.execute(
+        select(Baseline).where(Baseline.patient_id == patient_id)
+    )
+    baselines_data = [
+        {
+            "metric_name": b.metric_name,
+            "mean_value": b.mean_value,
+            "std_value": b.std_value,
+            "min_value": b.min_value,
+            "max_value": b.max_value,
+            "sample_count": b.sample_count,
+            "calculated_at": b.calculated_at.isoformat() if b.calculated_at else None,
+        }
+        for b in bl_result.scalars().all()
+    ]
+
+    # Audit log
+    await log_action(
+        db,
+        user_id=current_user.get("user_id"),
+        action="rgpd_data_export",
+        resource="patient",
+        resource_id=patient_id,
+        details={"article": "RGPD Art. 20 — Portabilite"},
+    )
+    await db.commit()
+
+    return {
+        "patient": patient_data,
+        "daily_aggregates": daily_aggregates_data,
+        "risk_scores": risk_scores_data,
+        "notifications": notifications_data,
+        "consents": consents_data,
+        "baselines": baselines_data,
+        "export_date": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.delete("/patients/{patient_id}/data-anonymize")
+async def rgpd_data_anonymize(
+    patient_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_role("admin")),
+):
+    """
+    RGPD Article 17 — Droit a l'effacement.
+    Anonymise le patient et supprime ses donnees de sante.
+    Le dossier patient est conserve (anonymise) pour la piste d'audit.
+    """
+    result = await db.execute(select(Patient).where(Patient.id == patient_id))
+    patient = result.scalar_one_or_none()
+    if patient is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient introuvable")
+
+    # Anonymize patient record
+    random_suffix = uuid4().hex[:8]
+    patient.first_name = "Anonyme"
+    patient.last_name = "XXXXX"
+    patient.emergency_contact_phone = None
+    patient.diagnosis = None
+    patient.device_token_fcm = None
+    patient.smartwatch_model = None
+    patient.updated_at = datetime.now(timezone.utc)
+
+    # Anonymize associated user email if user exists
+    if patient.user_id:
+        user_result = await db.execute(select(User).where(User.id == patient.user_id))
+        user = user_result.scalar_one_or_none()
+        if user:
+            user.email = f"anonyme_{random_suffix}@deleted.mood-iot.local"
+            user.is_active = False
+
+    # Delete health data (daily_aggregates, feature_vectors, risk_scores)
+    await db.execute(delete(DailyAggregate).where(DailyAggregate.patient_id == patient_id))
+    await db.execute(delete(FeatureVector).where(FeatureVector.patient_id == patient_id))
+    await db.execute(delete(RiskScore).where(RiskScore.patient_id == patient_id))
+
+    # Audit log
+    await log_action(
+        db,
+        user_id=current_user.get("user_id"),
+        action="rgpd_data_anonymize",
+        resource="patient",
+        resource_id=patient_id,
+        details={"article": "RGPD Art. 17 — Droit a l'effacement"},
+    )
+    await db.commit()
+
+    return {
+        "message": f"Patient {patient_id} anonymise avec succes.",
+        "anonymized_at": datetime.now(timezone.utc).isoformat(),
+        "deleted_data": ["daily_aggregates", "feature_vectors", "risk_scores"],
+    }
+
+
+@app.put("/patients/{patient_id}/consents/rgpd", response_model=RGPDConsentResponse)
+async def rgpd_update_consent(
+    patient_id: str,
+    payload: RGPDConsentUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_role("psychiatre", "admin")),
+):
+    """
+    RGPD — Mise a jour d'un consentement individuel.
+    Cree ou met a jour un enregistrement de consentement pour le patient.
+    """
+    # Verify patient exists
+    pat_result = await db.execute(select(Patient.id).where(Patient.id == patient_id))
+    if pat_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient introuvable")
+
+    # Resolve consent type enum
+    try:
+        consent_type_enum = ConsentType(payload.consent_type)
+    except ValueError:
+        valid_types = [ct.value for ct in ConsentType]
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Type de consentement invalide. Valeurs acceptees : {valid_types}",
+        )
+
+    now = datetime.now(timezone.utc)
+
+    # Find existing consent
+    result = await db.execute(
+        select(Consent).where(
+            and_(
+                Consent.patient_id == patient_id,
+                Consent.consent_type == consent_type_enum,
+            )
+        )
+    )
+    consent = result.scalar_one_or_none()
+
+    if consent:
+        consent.is_granted = payload.granted
+        consent.granted_at = now if payload.granted else consent.granted_at
+        consent.revoked_at = now if not payload.granted else None
+    else:
+        consent = Consent(
+            patient_id=patient_id,
+            consent_type=consent_type_enum,
+            is_granted=payload.granted,
+            granted_at=now if payload.granted else None,
+            revoked_at=now if not payload.granted else None,
+        )
+        db.add(consent)
+
+    # Audit log
+    await log_action(
+        db,
+        user_id=current_user.get("user_id"),
+        action="rgpd_update_consent",
+        resource="consent",
+        resource_id=patient_id,
+        details={
+            "consent_type": payload.consent_type,
+            "granted": payload.granted,
+        },
+    )
+    await db.commit()
+
+    return RGPDConsentResponse(
+        patient_id=patient_id,
+        consent_type=payload.consent_type,
+        granted=payload.granted,
+        updated_at=now.isoformat(),
+    )
 
 
 # ---------------------------------------------------------------------------

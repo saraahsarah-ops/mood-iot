@@ -89,6 +89,30 @@ export async function deleteNotification(notifId: string) {
   });
 }
 
+/* ── Teleconsultation ────────────────────────────────── */
+export async function getTeleconsultSessions(patientId?: string) {
+  const query = patientId ? `?patient_id=${patientId}` : "";
+  return fetcher<any>(`/teleconsult/sessions${query}`);
+}
+
+export async function createTeleconsultSession(data: {
+  patient_id: string;
+  psychiatre_id: string;
+  scheduled_at: string;
+  duration_minutes?: number;
+}) {
+  return fetcher<any>("/teleconsult/sessions", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function joinTeleconsultSession(sessionId: string) {
+  return fetcher<any>(`/teleconsult/sessions/${sessionId}/join`, {
+    method: "POST",
+  });
+}
+
 /* ── WebSocket alertes temps reel ─────────────────────── */
 export function connectAlertWS(
   userId: string,

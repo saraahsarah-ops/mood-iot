@@ -24,9 +24,14 @@ from src.shared.config import settings
 from src.shared.models import (
     EscalationLog,
     Notification,
+    NotificationChannel,
+    NotificationStatus,
+    NotificationType,
     Patient,
     PatientPsychiatrist,
     TeleconsultSession,
+    TeleconsultTrigger,
+    TeleconsultStatus,
     User,
 )
 from src.notification.channels import (
@@ -134,20 +139,22 @@ class EscalationEngine:
         resultats["fcm_patient"] = fcm_ok
 
         # --- Persistance de la notification ---
+        notif_id = str(uuid4())
         notification = Notification(
-            id=str(uuid4()),
+            id=notif_id,
             patient_id=str(patient.id),
+            recipient_user_id=str(patient.user_id) if hasattr(patient, "user_id") and patient.user_id else str(patient.id),
             title="Coaching IA",
             body=coaching_message,
-            channel="push",
-            priority="normal",
-            escalation_level=1,
+            type=NotificationType.coaching_ia,
+            level=1,
+            channel=NotificationChannel.push_fcm,
+            status=NotificationStatus.pending,
             risk_score_id=risk_score_id,
-            acknowledged=False,
         )
         db.add(notification)
         await db.flush()
-        logger.info("Notification de coaching persistee (id : %s)", notification.id)
+        logger.info("Notification de coaching persistee (id : %s)", notif_id)
 
         return {
             "alert_level": 1,
@@ -234,25 +241,28 @@ class EscalationEngine:
         resultats["email_psychiatre"] = email_ok
 
         # --- Persistance de la notification ---
+        notif_id = str(uuid4())
         notification = Notification(
-            id=str(uuid4()),
+            id=notif_id,
             patient_id=str(patient.id),
+            recipient_user_id=str(psychiatrist.id),
             title=alerte_titre,
             body=alerte_corps,
-            channel="multi",
-            priority="high",
-            escalation_level=2,
+            type=NotificationType.alerte_psychiatre,
+            level=2,
+            channel=NotificationChannel.websocket,
+            status=NotificationStatus.pending,
             risk_score_id=risk_score_id,
-            acknowledged=False,
         )
         db.add(notification)
         await db.flush()
-        logger.info("Notification d'alerte psychiatre persistee (id : %s)", notification.id)
+        logger.info("Notification d'alerte psychiatre persistee (id : %s)", notif_id)
 
         return {
             "alert_level": 2,
             "channels_used": ["websocket", "sms_psychiatre", "fcm_psychiatre", "email_psychiatre"],
             "actions": resultats,
+            "notification_id": notif_id,
         }
 
     # ------------------------------------------------------------------ #
@@ -300,18 +310,16 @@ class EscalationEngine:
         teleconsult_id = str(uuid4())
         scheduled_at = datetime.now(timezone.utc) + timedelta(hours=2)
         jitsi_room = f"mood-iot-urgence-{teleconsult_id[:8]}"
-        jitsi_url = f"{settings.JITSI_SERVER_URL}/{jitsi_room}"
 
         teleconsult = TeleconsultSession(
             id=teleconsult_id,
             patient_id=str(patient.id),
-            psychiatrist_id=str(psychiatrist.id) if psychiatrist else None,
+            psychiatrist_id=str(psychiatrist.id) if psychiatrist else str(uuid4()),
+            trigger=TeleconsultTrigger.alert_level3,
+            risk_score_id=risk_score_id,
+            jitsi_room_id=jitsi_room,
+            status=TeleconsultStatus.scheduled,
             scheduled_at=scheduled_at,
-            jitsi_room_name=jitsi_room,
-            jitsi_url=jitsi_url,
-            status="scheduled",
-            created_by="system_escalation",
-            notes=f"Session auto-creee suite a une alerte de niveau 3 (score={score:.0f})",
         )
         db.add(teleconsult)
         await db.flush()
@@ -344,43 +352,43 @@ class EscalationEngine:
             )
 
         # --- Persistance du journal d'escalade ---
-        escalation_log = EscalationLog(
-            id=str(uuid4()),
-            patient_id=str(patient.id),
-            risk_score_id=risk_score_id,
-            escalation_level=3,
-            score=score,
-            channels_used="websocket,sms,fcm,email,appel_vocal,teleconsultation,sms_urgence",
-            teleconsult_session_id=teleconsult_id,
-            psychiatrist_id=str(psychiatrist.id) if psychiatrist else None,
-            details={
-                "shap_explanations": shap_explanations[:3],
-                "resultats_canaux": {k: v for k, v in resultats.items() if isinstance(v, bool)},
-            },
-        )
-        db.add(escalation_log)
-        await db.flush()
-        logger.info("Journal d'escalade de niveau 3 persiste (id : %s)", escalation_log.id)
+        # Note : EscalationLog ORM a : notification_id, from_level, to_level, reason
+        # On cree le log apres la notification de niveau 3 pour avoir le notification_id
+        # Le log est cree plus bas, apres la notification
 
         # --- Notification de niveau 3 ---
+        notif3_id = str(uuid4())
         notification = Notification(
-            id=str(uuid4()),
+            id=notif3_id,
             patient_id=str(patient.id),
-            title=f"URGENCE : {patient.first_name} {patient.last_name}",
+            recipient_user_id=str(psychiatrist.id) if psychiatrist else str(patient.id),
+            title=f"URGENCE - {patient.first_name} {patient.last_name}",
             body=(
                 f"Score critique : {score:.0f}/100. "
                 f"Teleconsultation planifiee a {scheduled_at.strftime('%H:%M')} UTC. "
                 "Appel vocal et SMS envoyes."
             ),
-            channel="multi",
-            priority="urgent",
-            escalation_level=3,
+            type=NotificationType.urgence,
+            level=3,
+            channel=NotificationChannel.websocket,
+            status=NotificationStatus.pending,
             risk_score_id=risk_score_id,
-            acknowledged=False,
         )
         db.add(notification)
         await db.flush()
-        logger.info("Notification d'urgence persistee (id : %s)", notification.id)
+        logger.info("Notification d'urgence persistee (id : %s)", notif3_id)
+
+        # --- Journal d'escalade ---
+        escalation_log = EscalationLog(
+            id=str(uuid4()),
+            notification_id=notif3_id,
+            from_level=2,
+            to_level=3,
+            reason=f"Score critique {score:.0f}/100 - escalade automatique niveau 3",
+        )
+        db.add(escalation_log)
+        await db.flush()
+        logger.info("Journal d'escalade de niveau 3 persiste")
 
         all_channels = (
             level2_result.get("channels_used", [])

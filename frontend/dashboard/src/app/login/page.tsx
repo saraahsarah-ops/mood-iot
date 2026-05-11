@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/auth";
+import { motion } from "framer-motion";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -18,29 +19,99 @@ export default function LoginPage() {
     }
   };
 
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      {/* Decorative elements */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute -right-40 -top-40 h-96 w-96 rounded-full bg-primary-500/10 blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 h-96 w-96 rounded-full bg-primary-500/5 blur-3xl" />
-      </div>
+  const badges = [
+    {
+      icon: (
+        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+        </svg>
+      ),
+      text: "Chiffrement AES-256",
+    },
+    {
+      icon: (
+        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+        </svg>
+      ),
+      text: "Conforme RGPD",
+    },
+    {
+      icon: (
+        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
+        </svg>
+      ),
+      text: "Authentification JWT",
+    },
+  ];
 
-      <div className="relative w-full max-w-md px-4">
-        {/* Card */}
-        <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-8 shadow-2xl backdrop-blur-xl">
-          {/* Header */}
-          <div className="mb-8 text-center">
-            <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-400 to-primary-700 shadow-lg shadow-primary-500/25">
-              <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+  return (
+    <div className="flex min-h-screen">
+      {/* Left Panel - Hidden on mobile */}
+      <div className="relative hidden w-1/2 flex-col justify-between overflow-hidden bg-gradient-to-b from-slate-900 via-[#0a1172] to-slate-900 p-12 lg:flex">
+        {/* Decorative gradient circles */}
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute -left-24 -top-24 h-80 w-80 rounded-full bg-[#00c8e8]/10 blur-3xl" />
+          <div className="absolute bottom-20 right-10 h-64 w-64 rounded-full bg-[#00c8e8]/5 blur-3xl" />
+          <div className="absolute left-1/2 top-1/2 h-48 w-48 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary-500/10 blur-3xl" />
+        </div>
+
+        {/* Logo & Name */}
+        <div className="relative z-10">
+          <div className="mb-4 flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-primary-400 to-primary-700 shadow-lg shadow-primary-500/25">
+              <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
               </svg>
             </div>
-            <h1 className="text-2xl font-extrabold tracking-tight text-white">
-              Mood-IoT
-            </h1>
-            <p className="mt-1.5 text-[13px] text-slate-400">
-              Plateforme de suivi psychiatrique
+            <span className="text-2xl font-extrabold tracking-tight text-white">Mood-IoT</span>
+          </div>
+          <p className="mt-2 text-lg font-medium text-[#00c8e8]">
+            Plateforme de telepsychiatrie intelligente
+          </p>
+        </div>
+
+        {/* Security Badges */}
+        <div className="relative z-10 space-y-3">
+          {badges.map((badge) => (
+            <div
+              key={badge.text}
+              className="flex w-fit items-center gap-2.5 rounded-full border border-[#00c8e8]/20 bg-[#00c8e8]/10 px-4 py-2 text-[13px] font-medium text-[#00c8e8]"
+            >
+              {badge.icon}
+              {badge.text}
+            </div>
+          ))}
+        </div>
+
+        {/* Spacer */}
+        <div />
+      </div>
+
+      {/* Right Panel - Login Form */}
+      <motion.div
+        initial={{ opacity: 0, x: 30 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.5, ease: "easeOut" }}
+        className="flex w-full items-center justify-center bg-white px-6 lg:w-1/2"
+      >
+        <div className="w-full max-w-md">
+          {/* Mobile-only logo */}
+          <div className="mb-8 text-center lg:hidden">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-primary-400 to-primary-700 shadow-lg shadow-primary-500/25">
+              <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
+              </svg>
+            </div>
+            <h1 className="text-2xl font-extrabold tracking-tight text-gray-900">Mood-IoT</h1>
+          </div>
+
+          {/* Desktop heading */}
+          <div className="mb-8 hidden lg:block">
+            <h2 className="text-2xl font-bold text-gray-900">Connexion</h2>
+            <p className="mt-1.5 text-[14px] text-gray-500">
+              Accédez à votre espace de suivi psychiatrique
             </p>
           </div>
 
@@ -50,7 +121,7 @@ export default function LoginPage() {
             <div>
               <label
                 htmlFor="email"
-                className="mb-1.5 block text-[12px] font-semibold uppercase tracking-wider text-slate-400"
+                className="mb-1.5 block text-[12px] font-semibold uppercase tracking-wider text-gray-500"
               >
                 Adresse email
               </label>
@@ -61,7 +132,7 @@ export default function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="dr.martin@mood-iot.fr"
                 required
-                className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-[13px] text-white placeholder-slate-500 transition focus:border-primary-500 focus:bg-white/10 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+                className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-[13px] text-gray-800 placeholder-gray-400 transition focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
               />
             </div>
 
@@ -69,7 +140,7 @@ export default function LoginPage() {
             <div>
               <label
                 htmlFor="password"
-                className="mb-1.5 block text-[12px] font-semibold uppercase tracking-wider text-slate-400"
+                className="mb-1.5 block text-[12px] font-semibold uppercase tracking-wider text-gray-500"
               >
                 Mot de passe
               </label>
@@ -81,12 +152,12 @@ export default function LoginPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••••"
                   required
-                  className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 pr-12 text-[13px] text-white placeholder-slate-500 transition focus:border-primary-500 focus:bg-white/10 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+                  className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 pr-12 text-[13px] text-gray-800 placeholder-gray-400 transition focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                 >
                   {showPassword ? (
                     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -104,11 +175,11 @@ export default function LoginPage() {
 
             {/* Error message */}
             {error && (
-              <div className="flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3">
-                <svg className="h-4 w-4 shrink-0 text-red-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+                <svg className="h-4 w-4 shrink-0 text-red-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
                 </svg>
-                <p className="text-[13px] text-red-300">{error}</p>
+                <p className="text-[13px] text-red-600">{error}</p>
               </div>
             )}
 
@@ -133,11 +204,11 @@ export default function LoginPage() {
           </form>
 
           {/* Footer */}
-          <p className="mt-8 text-center text-[11px] text-slate-500">
+          <p className="mt-8 text-center text-[11px] text-gray-400">
             Mood-IoT v2.0 — Fil Rouge Master ADE 2026
           </p>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }
