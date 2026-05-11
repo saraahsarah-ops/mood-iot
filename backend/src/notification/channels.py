@@ -418,6 +418,62 @@ class WebSocketChannel:
 
 
 # ---------------------------------------------------------------------------
+# Canal 6 : Email via Resend (alternative gratuite a SES)
+# ---------------------------------------------------------------------------
+
+
+class ResendChannel:
+    """Email via Resend.com (100 emails/jour gratuits)."""
+
+    def __init__(self) -> None:
+        self._api_key = getattr(settings, "RESEND_API_KEY", "") or ""
+        self._from_email = settings.SES_FROM_EMAIL
+        if self._api_key:
+            logger.info("Canal Resend initialise (from : %s)", self._from_email)
+        else:
+            logger.info("RESEND_API_KEY absente - canal Resend desactive")
+
+    async def send_email(self, to_email: str, subject: str, html_body: str) -> bool:
+        """Envoie un email via l'API Resend."""
+        if not self._api_key:
+            logger.warning("RESEND_API_KEY absente - email ignore")
+            return False
+
+        if not to_email:
+            logger.warning("Adresse email manquante - email ignore")
+            return False
+
+        try:
+            import httpx
+
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    "https://api.resend.com/emails",
+                    headers={
+                        "Authorization": f"Bearer {self._api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "from": self._from_email,
+                        "to": [to_email],
+                        "subject": subject,
+                        "html": html_body,
+                    },
+                    timeout=10.0,
+                )
+                if resp.status_code in (200, 201):
+                    data = resp.json()
+                    logger.info("Email Resend envoye a %s (id : %s)", to_email, data.get("id"))
+                    return True
+                else:
+                    logger.error("Resend erreur %d : %s", resp.status_code, resp.text)
+                    return False
+        except Exception as exc:
+            logger.error("Erreur Resend vers %s : %s", to_email, exc)
+            return False
+
+
+# ---------------------------------------------------------------------------
 # Singletons des canaux (initialises une seule fois au demarrage)
 # ---------------------------------------------------------------------------
 
@@ -425,4 +481,12 @@ claude_coaching = ClaudeCoachingChannel()
 fcm_channel = FCMChannel()
 twilio_channel = TwilioChannel()
 ses_channel = SESChannel()
+resend_channel = ResendChannel()
 ws_channel = WebSocketChannel()
+
+
+def get_email_channel():
+    """Retourne le canal email actif : Resend si configure, sinon SES."""
+    if resend_channel._api_key:
+        return resend_channel
+    return ses_channel

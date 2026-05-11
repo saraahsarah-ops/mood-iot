@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     TWILIO_FROM_PHONE: str = ""
     FCM_CREDENTIALS_JSON: str = "{}"
     SES_FROM_EMAIL: str = "noreply@mood-iot.fr"
+    RESEND_API_KEY: str = ""
 
     # ── Jitsi ───────────────────────────────────────────────────────────────
     JITSI_SERVER_URL: str = "https://meet.jit.si"
