@@ -10,11 +10,14 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Geolocation from 'react-native-geolocation-service';
 import * as HealthConnect from 'react-native-health-connect';
 
 import LoginScreen from './src/screens/LoginScreen';
+import ConsentScreen from './src/screens/ConsentScreen';
 import { authService } from './src/services/auth';
+import { healthSyncService } from './src/services/healthSync';
 
 // ---------------------------------------------------------------------------
 // Main health hub screen (existing functionality)
@@ -28,13 +31,17 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
   const [steps, setSteps] = useState('--');
   const [heartRate, setHeartRate] = useState('--');
   const [sleep, setSleep] = useState('--');
+  const [sleepMinutes, setSleepMinutes] = useState<number | null>(null);
   const [location, setLocation] = useState<{latitude: number; longitude: number} | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
 
   const isAndroid = Platform.OS === 'android';
 
   const formatSleepDuration = (startTime: string, endTime: string) => {
     const durationMs = new Date(endTime).getTime() - new Date(startTime).getTime();
     const totalMinutes = Math.floor(durationMs / (1000 * 60));
+    setSleepMinutes(totalMinutes);
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
     return `${hours}h ${minutes}m`;
@@ -175,12 +182,41 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
             </View>
           </View>
 
+          {syncStatus && (
+            <View style={[styles.syncBanner, syncStatus.startsWith('✓') ? styles.syncSuccess : styles.syncError]}>
+              <Text style={styles.syncText}>{syncStatus}</Text>
+            </View>
+          )}
+
           <View style={styles.buttonGroup}>
             <TouchableOpacity
               style={[styles.button, styles.btnPrimary]}
               onPress={fetchHealthData}
             >
-              <Text style={styles.buttonText}>TOUT SYNCHRONISER</Text>
+              <Text style={styles.buttonText}>COLLECTER DONNEES</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.button, styles.btnSync, syncing && styles.btnDisabled]}
+              onPress={async () => {
+                setSyncing(true);
+                setSyncStatus(null);
+                const payload = healthSyncService.buildPayloadFromLocal({
+                  steps,
+                  heartRate,
+                  sleepMinutes,
+                  latitude: location?.latitude ?? null,
+                  longitude: location?.longitude ?? null,
+                });
+                const result = await healthSyncService.syncHealthData(payload);
+                setSyncStatus(result.success ? `✓ ${result.message}` : `✗ ${result.message}`);
+                setSyncing(false);
+              }}
+              disabled={syncing}
+            >
+              <Text style={styles.buttonText}>
+                {syncing ? 'ENVOI EN COURS...' : 'ENVOYER AU SERVEUR'}
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -207,17 +243,24 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
 // Root App with auth guard
 // ---------------------------------------------------------------------------
 
+const CONSENT_STORAGE_KEY = '@mood_iot_consent_given';
+
 const App = () => {
   const [isReady, setIsReady] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [hasConsent, setHasConsent] = useState(false);
 
   useEffect(() => {
-    const checkAuth = async () => {
-      const authenticated = await authService.isAuthenticated();
+    const checkState = async () => {
+      const [authenticated, consent] = await Promise.all([
+        authService.isAuthenticated(),
+        AsyncStorage.getItem(CONSENT_STORAGE_KEY),
+      ]);
       setIsLoggedIn(authenticated);
+      setHasConsent(consent !== null);
       setIsReady(true);
     };
-    checkAuth();
+    checkState();
   }, []);
 
   if (!isReady) {
@@ -230,12 +273,15 @@ const App = () => {
     );
   }
 
+  // Flow: Consent → Login → Home
   return (
     <SafeAreaProvider>
-      {isLoggedIn ? (
-        <HomeScreen onLogout={() => setIsLoggedIn(false)} />
-      ) : (
+      {!hasConsent ? (
+        <ConsentScreen onConsentGiven={() => setHasConsent(true)} />
+      ) : !isLoggedIn ? (
         <LoginScreen onLoginSuccess={() => setIsLoggedIn(true)} />
+      ) : (
+        <HomeScreen onLogout={() => setIsLoggedIn(false)} />
       )}
     </SafeAreaProvider>
   );
@@ -299,9 +345,22 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   btnPrimary: { backgroundColor: '#007AFF' },
+  btnSync: { backgroundColor: '#2ecc71' },
+  btnDisabled: { backgroundColor: '#A0AEC0' },
   btnSecondary: { backgroundColor: '#636e72' },
   btnLogout: { backgroundColor: '#E53E3E' },
   buttonText: { color: 'white', fontWeight: '800', fontSize: 13 },
+  syncBanner: {
+    width: '100%',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    marginBottom: 15,
+    alignItems: 'center',
+  },
+  syncSuccess: { backgroundColor: '#d4edda' },
+  syncError: { backgroundColor: '#f8d7da' },
+  syncText: { fontSize: 13, fontWeight: '600', color: '#1a1a1a' },
 });
 
 export default App;
