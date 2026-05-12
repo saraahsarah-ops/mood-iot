@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import {
   getTeleconsultSessions,
   createTeleconsultSession,
@@ -68,6 +69,7 @@ export default function TeleconsultPage() {
   const [selectedPatient, setSelectedPatient] = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
   const [durationMinutes, setDurationMinutes] = useState(30);
+  const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -120,11 +122,13 @@ export default function TeleconsultPage() {
         psychiatre_id: user?.id || "",
         scheduled_at: new Date(scheduledAt).toISOString(),
         duration_minutes: durationMinutes,
+        reason: reason || undefined,
       });
       setShowForm(false);
       setSelectedPatient("");
       setScheduledAt("");
       setDurationMinutes(30);
+      setReason("");
       await loadSessions();
     } catch (err) {
       console.error("Erreur creation session:", err);
@@ -211,7 +215,7 @@ export default function TeleconsultPage() {
             Planifier une teleconsultation
           </h2>
 
-          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {/* Patient select */}
             <div>
               <label className="mb-1 block text-[13px] font-medium text-gray-500">
@@ -265,6 +269,20 @@ export default function TeleconsultPage() {
                 <option value={45}>45 min</option>
                 <option value={60}>60 min</option>
               </select>
+            </div>
+
+            {/* Reason */}
+            <div className="sm:col-span-2 lg:col-span-3">
+              <label className="mb-1 block text-[13px] font-medium text-gray-500">
+                Motif de consultation (optionnel)
+              </label>
+              <input
+                type="text"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Ex: Suivi mensuel, ajustement traitement..."
+                className="h-10 w-full rounded-lg border border-gray-200 px-3 text-[13px] text-gray-700 outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
+              />
             </div>
 
             {/* Actions */}
@@ -415,6 +433,14 @@ function SessionRow({
             {joiningId === session.id ? "Connexion..." : "Rejoindre"}
           </button>
         )}
+
+        {/* Detail link */}
+        <Link
+          href={`/teleconsult/${session.id}`}
+          className="rounded-xl border border-gray-200 px-3 py-1.5 text-[13px] font-medium text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-700"
+        >
+          Details
+        </Link>
       </div>
     </div>
   );

@@ -13,7 +13,14 @@ async function fetcher<T>(path: string, options?: RequestInit): Promise<T> {
       ...options?.headers,
     },
   });
-  if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = body.detail || body.message || detail;
+    } catch { /* ignore parse error */ }
+    throw new Error(detail);
+  }
   return res.json();
 }
 
@@ -90,9 +97,23 @@ export async function deleteNotification(notifId: string) {
 }
 
 /* ── Teleconsultation ────────────────────────────────── */
-export async function getTeleconsultSessions(patientId?: string) {
-  const query = patientId ? `?patient_id=${patientId}` : "";
-  return fetcher<any>(`/teleconsult/sessions${query}`);
+export async function getTeleconsultSessions(
+  patientId?: string,
+  dateFrom?: string,
+  dateTo?: string,
+) {
+  const params = new URLSearchParams();
+  if (patientId) params.set("patient_id", patientId);
+  if (dateFrom) params.set("date_from", dateFrom);
+  if (dateTo) params.set("date_to", dateTo);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return fetcher<{ sessions: any[]; total: number }>(
+    `/teleconsult/sessions${query}`,
+  );
+}
+
+export async function getTeleconsultSession(sessionId: string) {
+  return fetcher<any>(`/teleconsult/sessions/${sessionId}`);
 }
 
 export async function createTeleconsultSession(data: {
@@ -100,6 +121,7 @@ export async function createTeleconsultSession(data: {
   psychiatre_id: string;
   scheduled_at: string;
   duration_minutes?: number;
+  reason?: string;
 }) {
   return fetcher<any>("/teleconsult/sessions", {
     method: "POST",
@@ -110,6 +132,144 @@ export async function createTeleconsultSession(data: {
 export async function joinTeleconsultSession(sessionId: string) {
   return fetcher<any>(`/teleconsult/sessions/${sessionId}/join`, {
     method: "POST",
+  });
+}
+
+export async function endTeleconsultSession(
+  sessionId: string,
+  summary?: string,
+) {
+  return fetcher<any>(`/teleconsult/sessions/${sessionId}/end`, {
+    method: "PUT",
+    body: JSON.stringify({ summary }),
+  });
+}
+
+export async function deleteTeleconsultSession(sessionId: string) {
+  return fetcher<any>(`/teleconsult/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
+}
+
+/* ── Session Notes ──────────────────────────────────── */
+export async function getSessionNotes(sessionId: string) {
+  return fetcher<any[]>(`/teleconsult/sessions/${sessionId}/notes`);
+}
+
+export async function addSessionNote(
+  sessionId: string,
+  data: { content: string; note_type?: string; is_private?: boolean },
+) {
+  return fetcher<any>(`/teleconsult/sessions/${sessionId}/notes`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+/* ── Doctor / Institution ───────────────────────────── */
+export async function registerDoctor(data: {
+  email: string;
+  password: string;
+  first_name: string;
+  last_name: string;
+  rpps_number: string;
+  license_number: string;
+  speciality?: string;
+  rgpd_consent: boolean;
+  institution_name?: string;
+}) {
+  return fetcher<{ message: string }>("/doctor/register", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getDoctorProfile() {
+  return fetcher<any>("/doctor/me");
+}
+
+export async function updateDoctorProfile(data: {
+  first_name?: string;
+  last_name?: string;
+  speciality?: string;
+}) {
+  return fetcher<any>("/doctor/me", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getPendingDoctors() {
+  return fetcher<any[]>("/doctor/pending");
+}
+
+export async function approveDoctor(userId: string) {
+  return fetcher<{ message: string }>(`/doctor/${userId}/approve`, {
+    method: "PUT",
+  });
+}
+
+export async function rejectDoctor(userId: string, reason: string) {
+  return fetcher<{ message: string }>(`/doctor/${userId}/reject`, {
+    method: "PUT",
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export async function getInstitutionMembers() {
+  return fetcher<any[]>("/doctor/institution/members");
+}
+
+export async function addInstitutionMember(data: {
+  email: string;
+  password: string;
+  first_name: string;
+  last_name: string;
+  rpps_number: string;
+  license_number: string;
+  speciality?: string;
+}) {
+  return fetcher<{ message: string }>("/doctor/institution/members", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function removeInstitutionMember(userId: string) {
+  return fetcher<{ message: string }>(
+    `/doctor/institution/members/${userId}`,
+    { method: "DELETE" },
+  );
+}
+
+/* ── Patient CRUD ───────────────────────────────────── */
+export async function createPatient(data: {
+  first_name: string;
+  last_name: string;
+  date_of_birth: string;
+  gender: string;
+  email?: string;
+  phone?: string;
+}) {
+  return fetcher<any>("/patients", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updatePatient(
+  patientId: string,
+  data: { first_name?: string; last_name?: string; phone?: string },
+) {
+  return fetcher<any>(`/patients/${patientId}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deletePatient(patientId: string) {
+  return fetcher<{ message: string }>(`/patients/${patientId}`, {
+    method: "DELETE",
   });
 }
 

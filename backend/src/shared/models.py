@@ -127,6 +127,13 @@ class AlertFeedback(str, enum.Enum):
     partially_relevant = "partially_relevant"
 
 
+class RegistrationStatus(str, enum.Enum):
+    """Statut d'approbation du compte (medecins et institutions)."""
+    pending_approval = "pending_approval"
+    approved = "approved"
+    rejected = "rejected"
+
+
 # ============================================================================
 # ZONE 1 — Authentification
 # ============================================================================
@@ -147,6 +154,18 @@ class User(Base):
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     mfa_secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    registration_status: Mapped[RegistrationStatus] = mapped_column(
+        PgEnum(RegistrationStatus, name="registration_status", create_type=True),
+        default=RegistrationStatus.approved, nullable=False,
+        server_default="approved",
+    )
+    rgpd_consent_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    institution_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("institutions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -161,6 +180,12 @@ class User(Base):
     audit_logs: Mapped[list["AuditLog"]] = relationship(back_populates="user")
     patient_profile: Mapped[Optional["Patient"]] = relationship(
         back_populates="user", uselist=False
+    )
+    doctor_profile: Mapped[Optional["DoctorProfile"]] = relationship(
+        back_populates="user", uselist=False, foreign_keys="DoctorProfile.user_id"
+    )
+    institution: Mapped[Optional["Institution"]] = relationship(
+        back_populates="members", foreign_keys=[institution_id]
     )
 
 
@@ -210,6 +235,81 @@ class AuditLog(Base):
 
     # -- Relations --
     user: Mapped[Optional["User"]] = relationship(back_populates="audit_logs")
+
+
+# ============================================================================
+# ZONE 1b — Institutions & Profils medecins
+# ============================================================================
+
+
+class Institution(Base):
+    """Etablissement de sante (clinique, hopital) avec role admin."""
+
+    __tablename__ = "institutions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    siret: Mapped[Optional[str]] = mapped_column(String(20), unique=True, nullable=True)
+    address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    admin_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    # -- Relations --
+    members: Mapped[list["User"]] = relationship(
+        back_populates="institution", foreign_keys="User.institution_id"
+    )
+
+
+class DoctorProfile(Base):
+    """Profil detaille d'un medecin psychiatre (1:1 avec User)."""
+
+    __tablename__ = "doctor_profiles"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"),
+        unique=True, nullable=False,
+    )
+    first_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    last_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    speciality: Mapped[str] = mapped_column(String(100), default="Psychiatrie")
+    rpps_number_encrypted: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True, comment="Numero RPPS chiffre (Fernet)"
+    )
+    license_number_encrypted: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True, comment="Numero de licence chiffre (Fernet)"
+    )
+    certification_file_path: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True, comment="Chemin vers le justificatif uploade"
+    )
+    approval_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    approved_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    approved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    # -- Relations --
+    user: Mapped["User"] = relationship(
+        back_populates="doctor_profile", foreign_keys=[user_id]
+    )
 
 
 # ============================================================================
@@ -726,6 +826,7 @@ class TeleconsultSession(Base):
         DateTime(timezone=True), nullable=True
     )
     duration_min: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

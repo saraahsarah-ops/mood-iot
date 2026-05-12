@@ -41,9 +41,14 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       });
 
       if (!res.ok) {
-        const msg = res.status === 401
-          ? "Identifiants invalides"
-          : `Erreur serveur (${res.status})`;
+        let msg = `Erreur serveur (${res.status})`;
+        try {
+          const body = await res.json();
+          if (body.detail) msg = body.detail;
+        } catch { /* ignore */ }
+        if (res.status === 401 && !msg.includes("attente") && !msg.includes("rejet")) {
+          msg = "Identifiants invalides";
+        }
         set({ loading: false, error: msg });
         return false;
       }

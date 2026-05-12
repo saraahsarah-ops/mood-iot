@@ -437,6 +437,61 @@ async def update_patient(
     return _patient_to_response(patient, psych_id, email)
 
 
+@app.delete("/patients/{patient_id}", status_code=status.HTTP_200_OK)
+async def delete_patient(
+    patient_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_role("psychiatre", "admin")),
+):
+    """
+    Supprimer un dossier patient.
+    Le psychiatre ne peut supprimer que ses propres patients assignes.
+    L'admin peut supprimer n'importe quel patient.
+    """
+    result = await db.execute(select(Patient).where(Patient.id == patient_id))
+    patient = result.scalar_one_or_none()
+    if patient is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient introuvable")
+
+    # Verifier que le psychiatre est bien assigne a ce patient
+    if current_user["role"] == "psychiatre":
+        check = await db.execute(
+            select(PatientPsychiatrist).where(
+                and_(
+                    PatientPsychiatrist.patient_id == patient_id,
+                    PatientPsychiatrist.psychiatrist_id == current_user["user_id"],
+                )
+            )
+        )
+        if check.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Vous n'etes pas assigne a ce patient",
+            )
+
+    # Supprimer les donnees liees (cascades en BD, mais on nettoie explicitement)
+    await db.execute(delete(DailyAggregate).where(DailyAggregate.patient_id == patient_id))
+    await db.execute(delete(FeatureVector).where(FeatureVector.patient_id == patient_id))
+    await db.execute(delete(RiskScore).where(RiskScore.patient_id == patient_id))
+    await db.execute(delete(Consent).where(Consent.patient_id == patient_id))
+    await db.execute(delete(MoodEntry).where(MoodEntry.patient_id == patient_id))
+    await db.execute(delete(PatientPsychiatrist).where(PatientPsychiatrist.patient_id == patient_id))
+
+    await db.delete(patient)
+
+    # Audit log
+    await log_action(
+        db,
+        user_id=current_user.get("user_id"),
+        action="delete_patient",
+        resource="patient",
+        resource_id=patient_id,
+    )
+    await db.commit()
+
+    return {"message": f"Patient {patient_id} supprime avec succes."}
+
+
 # ---------------------------------------------------------------------------
 # Endpoints - Baseline
 # ---------------------------------------------------------------------------

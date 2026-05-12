@@ -33,6 +33,7 @@ from starlette.routing import Route, WebSocketRoute
 # ---------------------------------------------------------------------------
 
 from src.auth.main import app as auth_app
+from src.doctor.main import app as doctor_app
 from src.patient.main import app as patient_app
 from src.scoring.main import app as scoring_app
 from src.notification.main import app as notification_app
@@ -100,6 +101,7 @@ async def health():
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "services": {
             "auth": "mounted",
+            "doctor": "mounted",
             "patient": "mounted",
             "scoring": "mounted",
             "notification": "mounted",
@@ -118,6 +120,7 @@ async def health():
 
 _SUB_APPS = [
     (auth_app, "Auth"),
+    (doctor_app, "Doctor"),
     (patient_app, "Patient"),
     (scoring_app, "Scoring"),
     (notification_app, "Notification"),

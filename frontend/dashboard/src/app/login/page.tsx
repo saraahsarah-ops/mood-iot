@@ -203,8 +203,19 @@ export default function LoginPage() {
             </button>
           </form>
 
+          {/* Register link */}
+          <p className="mt-6 text-center text-[13px] text-gray-500">
+            Pas encore de compte ?{" "}
+            <a
+              href="/register/doctor"
+              className="font-semibold text-primary-500 hover:text-primary-600 transition-colors"
+            >
+              Inscription medecin
+            </a>
+          </p>
+
           {/* Footer */}
-          <p className="mt-8 text-center text-[11px] text-gray-400">
+          <p className="mt-4 text-center text-[11px] text-gray-400">
             Mood-IoT v2.0 — Fil Rouge Master ADE 2026
           </p>
         </div>

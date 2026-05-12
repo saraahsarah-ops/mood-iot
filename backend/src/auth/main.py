@@ -25,7 +25,8 @@ from src.shared.auth import (
     security,
 )
 from src.shared.database import get_db
-from src.shared.models import User, UserRole as DBUserRole
+from src.shared.models import User, UserRole as DBUserRole, DoctorProfile, RegistrationStatus
+from src.shared.password_policy import validate_password_strength
 
 # ---------------------------------------------------------------------------
 # Application
@@ -162,6 +163,15 @@ _blacklisted_tokens: set[str] = set()
 )
 async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Enregistrer un nouvel utilisateur."""
+    # Validation de la robustesse du mot de passe
+    try:
+        validate_password_strength(payload.password)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
     # Check duplicate
     result = await db.execute(select(User).where(User.email == payload.email))
     if result.scalar_one_or_none() is not None:
@@ -201,10 +211,23 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
             detail="Email ou mot de passe incorrect",
         )
 
+    # Bloquer les comptes non approuves (psychiatres en attente)
+    if hasattr(user, "registration_status") and user.registration_status is not None:
+        if user.registration_status == RegistrationStatus.pending_approval:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Votre compte est en attente d'approbation par un administrateur.",
+            )
+        if user.registration_status == RegistrationStatus.rejected:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Votre inscription a ete rejetee. Contactez l'administrateur.",
+            )
+
     access_token = create_access_token(str(user.id), user.role.value)
     refresh_token = create_refresh_token(str(user.id))
 
-    # Try to find patient profile for first/last name
+    # Resoudre le nom depuis patient ou doctor profile
     first_name = user.email.split("@")[0]
     last_name = ""
     if user.role == DBUserRole.patient:
@@ -216,6 +239,14 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
         if patient:
             first_name = patient.first_name
             last_name = patient.last_name
+    elif user.role in (DBUserRole.psychiatre, DBUserRole.admin):
+        doc_result = await db.execute(
+            select(DoctorProfile).where(DoctorProfile.user_id == user.id)
+        )
+        doctor = doc_result.scalar_one_or_none()
+        if doctor:
+            first_name = doctor.first_name
+            last_name = doctor.last_name
 
     # Audit log
     from src.shared.audit import log_action
@@ -355,7 +386,7 @@ async def get_me(
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Utilisateur introuvable")
 
-    # Try to get name from patient profile
+    # Resoudre le nom depuis patient ou doctor profile
     first_name = user.email.split("@")[0]
     last_name = ""
     if user.role == DBUserRole.patient:
@@ -367,6 +398,14 @@ async def get_me(
         if patient:
             first_name = patient.first_name
             last_name = patient.last_name
+    elif user.role in (DBUserRole.psychiatre, DBUserRole.admin):
+        doc_result = await db.execute(
+            select(DoctorProfile).where(DoctorProfile.user_id == user.id)
+        )
+        doctor = doc_result.scalar_one_or_none()
+        if doctor:
+            first_name = doctor.first_name
+            last_name = doctor.last_name
 
     return UserResponse(
         id=str(user.id),

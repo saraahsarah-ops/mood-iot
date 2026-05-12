@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     JITSI_JWT_SECRET: str = "change-me"
     JITSI_APP_ID: str = "mood-iot"
 
+    # ── Chiffrement (RGPD — donnees sensibles) ────────────────────────────
+    ENCRYPTION_KEY: str = ""
+    FILE_UPLOAD_DIR: str = "/tmp/mood-iot-certifications"
+
     @property
     def scoring_thresholds_tuple(self) -> tuple[int, int, int]:
         """Parse '40/60/80' → (40, 60, 80)."""

@@ -184,7 +184,7 @@ def _session_to_response(s: TeleconsultSession) -> SessionResponse:
         status=api_status,
         scheduled_at=s.scheduled_at.isoformat() if s.scheduled_at else "",
         duration_minutes=s.duration_min or 30,
-        reason=None,  # DB model doesn't have a reason field
+        reason=getattr(s, "reason", None),
         jitsi_room_name=s.jitsi_room_id,
         jitsi_url=_generate_jitsi_url(s.jitsi_room_id) if s.jitsi_room_id else None,
         started_at=s.started_at.isoformat() if s.started_at else None,
@@ -221,6 +221,7 @@ async def create_session(
         status=TeleconsultStatus.scheduled,
         scheduled_at=datetime.fromisoformat(payload.scheduled_at),
         duration_min=payload.duration_minutes,
+        reason=payload.reason,
     )
     db.add(session)
     await db.flush()
@@ -232,6 +233,8 @@ async def create_session(
 async def list_sessions(
     patient_id: Optional[str] = Query(None),
     session_status: Optional[SessionStatus] = Query(None, alias="status"),
+    date_from: Optional[str] = Query(None, description="Filtre date debut ISO 8601"),
+    date_to: Optional[str] = Query(None, description="Filtre date fin ISO 8601"),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
@@ -252,6 +255,10 @@ async def list_sessions(
         db_status = _STATUS_TO_DB.get(session_status.value)
         if db_status:
             query = query.where(TeleconsultSession.status == db_status)
+    if date_from:
+        query = query.where(TeleconsultSession.scheduled_at >= datetime.fromisoformat(date_from))
+    if date_to:
+        query = query.where(TeleconsultSession.scheduled_at <= datetime.fromisoformat(date_to))
 
     # Count
     count_q = select(func.count(TeleconsultSession.id))
@@ -270,6 +277,129 @@ async def list_sessions(
         sessions=[_session_to_response(s) for s in sessions],
         total=total,
     )
+
+
+@app.get(
+    "/teleconsult/sessions/{session_id}",
+    response_model=SessionResponse,
+)
+async def get_session_detail(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Recuperer le detail d'une session de teleconsultation."""
+    result = await db.execute(
+        select(TeleconsultSession).where(TeleconsultSession.id == session_id)
+    )
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session introuvable",
+        )
+
+    # Verifier participant
+    if (
+        current_user["user_id"] != str(session.patient_id)
+        and current_user["user_id"] != str(session.psychiatrist_id)
+        and current_user["role"] != "admin"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Vous n'etes pas participant de cette session",
+        )
+
+    return _session_to_response(session)
+
+
+@app.get(
+    "/teleconsult/sessions/{session_id}/notes",
+    response_model=list[SessionNoteResponse],
+)
+async def list_session_notes(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Lister toutes les notes d'une session de teleconsultation."""
+    # Verifier que la session existe
+    sess_result = await db.execute(
+        select(TeleconsultSession).where(TeleconsultSession.id == session_id)
+    )
+    session = sess_result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session introuvable",
+        )
+
+    # Verifier participant
+    if (
+        current_user["user_id"] != str(session.patient_id)
+        and current_user["user_id"] != str(session.psychiatrist_id)
+        and current_user["role"] != "admin"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Vous n'etes pas participant de cette session",
+        )
+
+    result = await db.execute(
+        select(SessionNote)
+        .where(SessionNote.session_id == session_id)
+        .order_by(SessionNote.created_at.asc())
+    )
+    notes = result.scalars().all()
+
+    return [
+        SessionNoteResponse(
+            id=str(n.id),
+            session_id=session_id,
+            author_id=str(n.psychiatrist_id),
+            content=n.content,
+            note_type="general",
+            is_private=False,
+            created_at=n.created_at.isoformat() if n.created_at else "",
+        )
+        for n in notes
+    ]
+
+
+@app.delete(
+    "/teleconsult/sessions/{session_id}",
+    status_code=status.HTTP_200_OK,
+)
+async def delete_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_role("psychiatre", "admin")),
+):
+    """Supprimer une session de teleconsultation (et ses notes)."""
+    result = await db.execute(
+        select(TeleconsultSession).where(TeleconsultSession.id == session_id)
+    )
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session introuvable",
+        )
+
+    # Verifier que le psychiatre est bien proprietaire
+    if current_user["role"] == "psychiatre" and str(session.psychiatrist_id) != current_user["user_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Vous n'etes pas le proprietaire de cette session",
+        )
+
+    # Supprimer les notes associees
+    from sqlalchemy import delete as sa_delete
+    await db.execute(sa_delete(SessionNote).where(SessionNote.session_id == session_id))
+    await db.delete(session)
+    await db.commit()
+
+    return {"message": f"Session {session_id} supprimee avec succes."}
 
 
 @app.post(
