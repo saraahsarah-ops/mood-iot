@@ -2,13 +2,27 @@
 Mood-IoT : Connexion à PostgreSQL via SQLAlchemy 2 (async).
 """
 
+import ssl as _ssl
+
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from .config import settings
 
 # Remplacer postgresql:// par postgresql+asyncpg:// pour le driver async
+# Retirer ?sslmode=require car asyncpg ne le supporte pas (on passe ssl via connect_args)
 _async_url = settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
+_async_url = _async_url.split("?sslmode=")[0] if "?sslmode=" in _async_url else _async_url
 
-engine = create_async_engine(_async_url, echo=(settings.LOG_LEVEL == "DEBUG"))
+# Detecter si on est en cloud (Supabase, etc.) pour activer SSL
+_is_cloud = "supabase" in settings.DATABASE_URL or settings.ENVIRONMENT == "production"
+
+_engine_kwargs: dict = {"echo": settings.LOG_LEVEL == "DEBUG"}
+if _is_cloud:
+    _ssl_ctx = _ssl.create_default_context()
+    _ssl_ctx.check_hostname = False
+    _ssl_ctx.verify_mode = _ssl.CERT_NONE
+    _engine_kwargs["connect_args"] = {"ssl": _ssl_ctx}
+
+engine = create_async_engine(_async_url, **_engine_kwargs)
 
 AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
