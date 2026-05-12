@@ -14,6 +14,9 @@ URLs finales :
   /api/v1/notifications/all    (notification service)
   /api/v1/teleconsult/sessions (teleconsult service)
 
+Swagger UI :
+  /docs                        (documentation interactive de toute l'API)
+
 Usage :
   uvicorn src.app_unified:app --host 0.0.0.0 --port ${PORT:-8000}
 """
@@ -22,6 +25,7 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.routing import APIRoute, APIWebSocketRoute
 from starlette.routing import Route, WebSocketRoute
 
 # ---------------------------------------------------------------------------
@@ -42,9 +46,25 @@ app = FastAPI(
     title="Mood-IoT Unified API",
     version="2.0.0",
     description=(
-        "API unifiee Mood-IoT — deploiement mono-processus pour Render free tier. "
-        "Monte auth, patient, scoring, notification et teleconsult sous /api/v1/."
+        "API unifiee de la plateforme Mood-IoT de telepsychiatrie.\n\n"
+        "## Services\n"
+        "- **Auth** : Authentification JWT, inscription, MFA (TOTP)\n"
+        "- **Patient** : Gestion des patients, donnees IoT, metriques\n"
+        "- **Scoring** : Pipeline ML heuristique, scores de risque, SHAP\n"
+        "- **Notification** : Systeme d'escalade (coaching IA → alerte → urgence)\n"
+        "- **Teleconsult** : Sessions Jitsi Meet avec JWT\n\n"
+        "## RGPD\n"
+        "- Export de donnees (Art. 20)\n"
+        "- Droit a l'oubli (Art. 17)\n"
+        "- Gestion des consentements\n"
     ),
+    contact={
+        "name": "Equipe Mood-IoT",
+        "email": "contact@mood-iot.fr",
+    },
+    license_info={
+        "name": "Projet universitaire — Master ADE 2026",
+    },
 )
 
 app.add_middleware(
@@ -60,7 +80,7 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 
 
-@app.get("/")
+@app.get("/", tags=["System"])
 async def root():
     """Racine — informations basiques."""
     return {
@@ -70,7 +90,7 @@ async def root():
     }
 
 
-@app.get("/api/v1/health")
+@app.get("/api/v1/health", tags=["System"])
 async def health():
     """Verification de sante de l'application unifiee."""
     return {
@@ -89,49 +109,57 @@ async def health():
 
 
 # ---------------------------------------------------------------------------
-# Aggregation des routes sous /api/v1
+# Aggregation des routes sous /api/v1 — directement dans l'app principale
 # ---------------------------------------------------------------------------
-# Chaque sous-application definit ses routes avec des prefixes internes :
-#   auth_app         -> /auth/login, /auth/register, /auth/me ...
-#   patient_app      -> /patients, /patients/{id}/mood ...
-#   scoring_app      -> /scoring/compute/{id}, /scoring/latest/{id} ...
-#   notification_app -> /notifications/all, /notifications/{id} ...
-#   teleconsult_app  -> /teleconsult/sessions ...
-#
-# On cree une app intermediaire (_v1) et on copie toutes les routes
-# dedans, puis on la monte sous /api/v1 sur l'app principale.
+# Au lieu de app.mount() (qui isole le sous-app et son Swagger),
+# on copie chaque route dans l'app principale avec le prefixe /api/v1.
+# Resultat : toutes les routes apparaissent dans /docs.
 # ---------------------------------------------------------------------------
 
-_v1 = FastAPI(
-    title="Mood-IoT API v1",
-    description="Aggregation de tous les microservices",
-)
+_SUB_APPS = [
+    (auth_app, "Auth"),
+    (patient_app, "Patient"),
+    (scoring_app, "Scoring"),
+    (notification_app, "Notification"),
+    (teleconsult_app, "Teleconsult"),
+]
 
-# Copier les evenements startup/shutdown
 _startup_handlers = []
 _shutdown_handlers = []
 
-_SUB_APPS = [auth_app, patient_app, scoring_app, notification_app, teleconsult_app]
-
-for sub_app in _SUB_APPS:
-    # Copier les routes (HTTP + WebSocket)
+for sub_app, tag in _SUB_APPS:
     for route in sub_app.routes:
-        if isinstance(route, (Route, WebSocketRoute)):
-            _v1.routes.append(route)
+        if isinstance(route, (APIRoute, Route)):
+            # Creer une nouvelle route avec le prefixe /api/v1
+            new_route = APIRoute(
+                path=f"/api/v1{route.path}",
+                endpoint=route.endpoint,
+                methods=route.methods,
+                name=route.name,
+                tags=[tag],
+                response_model=getattr(route, "response_model", None),
+                status_code=getattr(route, "status_code", None),
+                dependencies=getattr(route, "dependencies", None),
+            )
+            app.routes.append(new_route)
+        elif isinstance(route, (APIWebSocketRoute, WebSocketRoute)):
+            new_ws = APIWebSocketRoute(
+                path=f"/api/v1{route.path}",
+                endpoint=route.endpoint,
+                name=route.name,
+            )
+            app.routes.append(new_ws)
 
     # Copier les event handlers
     _startup_handlers.extend(sub_app.router.on_startup)
     _shutdown_handlers.extend(sub_app.router.on_shutdown)
 
-# Enregistrer les handlers sur _v1
+# Enregistrer les handlers startup/shutdown
 for handler in _startup_handlers:
-    _v1.add_event_handler("startup", handler)
+    app.add_event_handler("startup", handler)
 
 for handler in _shutdown_handlers:
-    _v1.add_event_handler("shutdown", handler)
-
-# Monter l'app v1 sous /api/v1
-app.mount("/api/v1", _v1)
+    app.add_event_handler("shutdown", handler)
 
 
 # ---------------------------------------------------------------------------
