@@ -213,6 +213,15 @@ export default function LoginPage() {
               Inscription medecin
             </a>
           </p>
+          
+          <p className="mt-2 text-center text-[13px] text-gray-500">
+            <a
+              href="/about"
+              className="font-semibold text-[#00c8e8] hover:text-primary-500 transition-colors"
+            >
+              Qu'est-ce que Mood IoT ?
+            </a>
+          </p>
 
           {/* Footer */}
           <p className="mt-4 text-center text-[11px] text-gray-400">

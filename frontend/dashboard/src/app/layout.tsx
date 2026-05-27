@@ -17,7 +17,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const [ready, setReady] = useState(false);
   const setStoreItems = useNotifStore((s) => s.setItems);
 
-  const isLoginPage = pathname === "/login";
+  const PUBLIC_ROUTES = ["/login", "/register/doctor", "/privacy", "/about"];
+  const isPublicPage = PUBLIC_ROUTES.some(
+    (route) => pathname === route || pathname.startsWith(route + "/"),
+  );
 
   useEffect(() => {
     restore();
@@ -38,13 +41,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
   useEffect(() => {
     if (!ready) return;
-    if (!isAuthenticated && !isLoginPage) {
+    if (!isAuthenticated && !isPublicPage) {
       router.push("/login");
     }
-  }, [ready, isAuthenticated, isLoginPage, router]);
+  }, [ready, isAuthenticated, isPublicPage, router]);
 
-  // Login page — no sidebar
-  if (isLoginPage) {
+  // Public pages — no sidebar
+  if (isPublicPage) {
     return (
       <html lang="fr">
         <body>

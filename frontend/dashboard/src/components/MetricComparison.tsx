@@ -26,9 +26,16 @@ export default function MetricComparison({
   const isGood = higherIsBetter ? delta >= 0 : delta <= 0;
   const isSignificant = pctChange > 20;
 
-  // Couleur : vert si bon, orange si mauvais modere, rouge si mauvais significatif
-  const isAlert = !isGood && isSignificant;
-  const isWarning = !isGood && !isSignificant;
+  // Absolute clinical danger overrides relative goodness
+  let isAbsoluteDanger = false;
+  if (label === "Sommeil" && current < 6) isAbsoluteDanger = true;
+  if (label === "BPM" && current >= 90) isAbsoluteDanger = true;
+  if (label === "Pas" && current < 5000) isAbsoluteDanger = true;
+  if (label === "Ecran" && current > 5) isAbsoluteDanger = true;
+
+  // Couleur : vert si bon, orange si mauvais modere, rouge si mauvais significatif ou danger absolu
+  const isAlert = isAbsoluteDanger || (!isGood && isSignificant);
+  const isWarning = !isGood && !isSignificant && !isAbsoluteDanger;
 
   const deltaColor = isGood
     ? "text-success-500"
@@ -40,11 +47,15 @@ export default function MetricComparison({
     : isAlert
       ? "bg-danger-50"
       : "bg-warning-50";
-  const barColor = isGood
-    ? "bg-success-400"
-    : isAlert
-      ? "bg-danger-400"
-      : "bg-warning-400";
+  
+  // Bar color represents absolute state better
+  const barColor = isAbsoluteDanger 
+    ? "bg-danger-400"
+    : isGood
+      ? "bg-success-400"
+      : isAlert
+        ? "bg-danger-400"
+        : "bg-warning-400";
 
   return (
     <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-card transition-all duration-200 hover:shadow-card-hover">

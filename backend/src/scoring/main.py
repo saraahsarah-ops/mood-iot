@@ -351,6 +351,22 @@ async def internal_compute_score(
         logger.warning("Scoring failed for %s: %s", patient_id, e)
         return {"status": "skipped", "reason": str(e)}
 
+    from datetime import timedelta as _td
+    is_recent = target_date >= (date.today() - _td(days=1))
+    if result.get("alert_level", 0) >= 1 and is_recent:
+        try:
+            from src.scoring.main import _create_alert_notification
+            await _create_alert_notification(
+                patient_id=patient_id,
+                score=result["score"],
+                alert_level=result["alert_level"],
+                score_id=str(result["score_id"]),
+                top_features=result.get("top_features", []),
+                db=db,
+            )
+        except Exception:
+            logger.exception("Erreur creation notification (internal) pour patient %s", patient_id)
+
     return {
         "status": "scored",
         "patient_id": patient_id,

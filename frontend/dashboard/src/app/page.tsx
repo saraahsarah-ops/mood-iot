@@ -35,22 +35,24 @@ export default function VueGenerale() {
         const patientList = res.patients || [];
 
         // 2. Fetch latest score for each patient
-        const withScores: PatientData[] = [];
-        for (const p of patientList) {
-          let score = 0;
+        // 2. Fetch latest score for each patient
+        const scoresPromises = patientList.map(async (p) => {
           try {
             const s = await getLatestScore(p.id);
-            score = Math.round(s.score);
+            return { p, score: Math.round(s.score) };
           } catch {
-            // No score yet
+            return { p, score: 0 };
           }
-          withScores.push({
-            id: p.id,
-            name: `${p.first_name} ${(p.last_name || "")[0]}.`,
-            score,
-            coaching: coachingMessage(score),
-          });
-        }
+        });
+
+        const scoresResults = await Promise.all(scoresPromises);
+
+        const withScores: PatientData[] = scoresResults.map(({ p, score }) => ({
+          id: p.id,
+          name: `${p.first_name} ${(p.last_name || "")[0]}.`,
+          score,
+          coaching: coachingMessage(score),
+        }));
         setPatients(withScores);
 
         // 3. Fetch score history for chart (each patient last 21 days)
@@ -58,19 +60,25 @@ export default function VueGenerale() {
         const allDates = new Set<string>();
         const histories: Record<string, Record<string, number>> = {};
 
-        for (const p of withScores) {
+        const historiesPromises = withScores.map(async (p) => {
           const shortName = p.name.split(" ")[0];
           nameMap[p.id] = shortName;
-          histories[shortName] = {};
           try {
             const h = await getScoreHistory(p.id, 21);
-            for (const s of h.scores || []) {
-              const d = s.date;
-              allDates.add(d);
-              histories[shortName][d] = Math.round(s.score);
-            }
+            return { shortName, scores: h.scores || [] };
           } catch {
-            // No history
+            return { shortName, scores: [] };
+          }
+        });
+
+        const historiesResults = await Promise.all(historiesPromises);
+
+        for (const { shortName, scores } of historiesResults) {
+          histories[shortName] = {};
+          for (const s of scores) {
+            const d = s.date;
+            allDates.add(d);
+            histories[shortName][d] = Math.round(s.score);
           }
         }
 
@@ -156,7 +164,7 @@ export default function VueGenerale() {
       </div>
 
       {/* KPI Cards */}
-      <div className="mt-6 grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <div className="mt-6 grid grid-cols-2 items-start gap-3 xl:grid-cols-4">
         <KpiCard
           emoji="🚨"
           label="Alertes critiques"

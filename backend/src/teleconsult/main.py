@@ -21,9 +21,10 @@ from src.shared.database import get_db
 from src.shared.models import (
     TeleconsultSession,
     SessionNote,
-    TeleconsultTrigger,
     TeleconsultStatus,
     AlertFeedback,
+    Message,
+    User,
 )
 
 # ---------------------------------------------------------------------------
@@ -116,6 +117,23 @@ class SessionNoteResponse(BaseModel):
     note_type: str
     is_private: bool
     created_at: str
+
+
+class MessageCreate(BaseModel):
+    content: str = Field(..., min_length=1, max_length=5000)
+
+class MessageResponse(BaseModel):
+    id: str
+    sender_id: str
+    recipient_id: str
+    content: str
+    sent_at: str
+    read_at: Optional[str]
+
+class HistoryResponse(BaseModel):
+    teleconsults: list[SessionResponse]
+    notes: list[SessionNoteResponse]
+    messages: list[MessageResponse]
 
 
 # ---------------------------------------------------------------------------
@@ -574,6 +592,123 @@ async def add_session_note(
         note_type=payload.note_type,
         is_private=payload.is_private,
         created_at=note.created_at.isoformat() if note.created_at else datetime.now(timezone.utc).isoformat(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Endpoints - Messages & History
+# ---------------------------------------------------------------------------
+
+@app.post(
+    "/teleconsult/messages/{patient_id}",
+    response_model=MessageResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def send_message(
+    patient_id: str,
+    payload: MessageCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Envoyer un message direct au patient ou au psychiatre."""
+    # Find patient
+    from src.shared.models import Patient, PatientPsychiatrist
+    pat_result = await db.execute(select(Patient).where(Patient.id == patient_id))
+    patient = pat_result.scalar_one_or_none()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient introuvable")
+        
+    # Get primary psychiatrist
+    psych_result = await db.execute(select(PatientPsychiatrist).where(and_(PatientPsychiatrist.patient_id == patient_id, PatientPsychiatrist.is_primary == True)))
+    assignment = psych_result.scalar_one_or_none()
+    
+    sender_id = current_user["user_id"]
+    if current_user["role"] == "patient":
+        if sender_id != str(patient.user_id):
+            raise HTTPException(status_code=403, detail="Acces refuse")
+        recipient_id = str(assignment.psychiatrist_id) if assignment else None
+    else:
+        # Psychiatre sends to patient
+        recipient_id = str(patient.user_id)
+        
+    if not recipient_id:
+        raise HTTPException(status_code=400, detail="Destinataire introuvable")
+
+    msg = Message(
+        sender_id=sender_id,
+        recipient_id=recipient_id,
+        content=payload.content,
+    )
+    db.add(msg)
+    await db.commit()
+    await db.refresh(msg)
+
+    return MessageResponse(
+        id=str(msg.id),
+        sender_id=str(msg.sender_id),
+        recipient_id=str(msg.recipient_id),
+        content=msg.content,
+        sent_at=msg.sent_at.isoformat() if msg.sent_at else datetime.now(timezone.utc).isoformat(),
+        read_at=None,
+    )
+
+@app.get(
+    "/teleconsult/history/{patient_id}",
+    response_model=HistoryResponse,
+)
+async def get_patient_history(
+    patient_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Recuperer tout l'historique d'un patient (appels, notes, messages)."""
+    # 1. Appels
+    sess_res = await db.execute(select(TeleconsultSession).where(TeleconsultSession.patient_id == patient_id).order_by(TeleconsultSession.scheduled_at.desc()))
+    sessions = sess_res.scalars().all()
+    
+    # 2. Notes
+    notes = []
+    if sessions:
+        session_ids = [s.id for s in sessions]
+        notes_res = await db.execute(select(SessionNote).where(SessionNote.session_id.in_(session_ids)).order_by(SessionNote.created_at.desc()))
+        notes = notes_res.scalars().all()
+        
+    # 3. Messages
+    from src.shared.models import Patient
+    pat_res = await db.execute(select(Patient).where(Patient.id == patient_id))
+    patient = pat_res.scalar_one_or_none()
+    messages = []
+    if patient:
+        msg_res = await db.execute(
+            select(Message).where(
+                (Message.sender_id == patient.user_id) | (Message.recipient_id == patient.user_id)
+            ).order_by(Message.sent_at.desc())
+        )
+        messages = msg_res.scalars().all()
+        
+    return HistoryResponse(
+        teleconsults=[_session_to_response(s) for s in sessions],
+        notes=[
+            SessionNoteResponse(
+                id=str(n.id),
+                session_id=str(n.session_id),
+                author_id=str(n.psychiatrist_id),
+                content=n.content,
+                note_type="general",
+                is_private=False,
+                created_at=n.created_at.isoformat() if n.created_at else ""
+            ) for n in notes
+        ],
+        messages=[
+            MessageResponse(
+                id=str(m.id),
+                sender_id=str(m.sender_id),
+                recipient_id=str(m.recipient_id),
+                content=m.content,
+                sent_at=m.sent_at.isoformat() if m.sent_at else "",
+                read_at=m.read_at.isoformat() if m.read_at else None
+            ) for m in messages
+        ]
     )
 
 

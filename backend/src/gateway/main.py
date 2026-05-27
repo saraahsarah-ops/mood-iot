@@ -47,6 +47,7 @@ SERVICE_URLS = {
     "scoring": "http://ml-scoring:8003" if _IN_DOCKER else "http://localhost:8003",
     "notification": "http://notification-service:8004" if _IN_DOCKER else "http://localhost:8004",
     "teleconsult": "http://teleconsult-service:8005" if _IN_DOCKER else "http://localhost:8005",
+    "doctor": "http://doctor-service:8006" if _IN_DOCKER else "http://localhost:8006",
 }
 
 # Shared httpx client (connection pooling)
@@ -141,6 +142,7 @@ async def health_check():
         "scoring": "/scoring/health",
         "notification": "/health",
         "teleconsult": "/teleconsult/health",
+        "doctor": "/doctor/health",
     }
     for name, url in SERVICE_URLS.items():
         try:
@@ -216,6 +218,15 @@ async def proxy_notification(request: Request, path: str):
 async def proxy_teleconsult(request: Request, path: str):
     """Proxy vers le service Teleconsult (port 8005)."""
     return await _proxy(request, "teleconsult", f"teleconsult/{path}")
+
+
+@app.api_route(
+    "/api/v1/doctor/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+)
+async def proxy_doctor(request: Request, path: str):
+    """Proxy vers le service Doctor (port 8006)."""
+    return await _proxy(request, "doctor", f"doctor/{path}")
 
 
 # ---------------------------------------------------------------------------

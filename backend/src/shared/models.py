@@ -334,7 +334,7 @@ class Patient(Base):
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     date_of_birth: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     gender: Mapped[Optional[Gender]] = mapped_column(
-        PgEnum(Gender, name="gender", create_type=True), nullable=True
+        PgEnum(Gender, name="gender_type", create_type=True), nullable=True
     )
     diagnosis: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     treatment_start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
@@ -872,3 +872,30 @@ class SessionNote(Base):
     # -- Relations --
     session: Mapped["TeleconsultSession"] = relationship(back_populates="notes")
     psychiatrist: Mapped["User"] = relationship(foreign_keys=[psychiatrist_id])
+
+
+class Message(Base):
+    """Messages directs entre patient et psychiatre."""
+
+    __tablename__ = "messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    sender_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    recipient_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    read_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # -- Relations --
+    sender: Mapped["User"] = relationship(foreign_keys=[sender_id])
+    recipient: Mapped["User"] = relationship(foreign_keys=[recipient_id])

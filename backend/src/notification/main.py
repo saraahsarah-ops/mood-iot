@@ -113,6 +113,11 @@ class EscalationSummary(BaseModel):
     notifications_created: int
     success: bool
 
+class AIAnalysisResponse(BaseModel):
+    patient_id: str
+    analysis: str
+    generated_at: str
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -429,6 +434,85 @@ async def unread_count(
     count = result.scalar() or 0
 
     return UnreadCountResponse(patient_id=patient_id, unread_count=count)
+
+@app.post(
+    "/notifications/ai-analysis/{patient_id}",
+    response_model=AIAnalysisResponse,
+)
+async def generate_ai_analysis(
+    patient_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_role("psychiatre", "admin")),
+):
+    """Genere une synthese clinique IA (historique appels, notes, messages)."""
+    import anthropic
+    from src.shared.models import Patient, TeleconsultSession, SessionNote, Message, MoodEntry
+
+    # Get patient
+    pat_res = await db.execute(select(Patient).where(Patient.id == patient_id))
+    patient = pat_res.scalar_one_or_none()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient introuvable")
+
+    # Get notes
+    sess_res = await db.execute(select(TeleconsultSession).where(TeleconsultSession.patient_id == patient_id))
+    session_ids = [s.id for s in sess_res.scalars().all()]
+    notes = []
+    if session_ids:
+        notes_res = await db.execute(select(SessionNote).where(SessionNote.session_id.in_(session_ids)).order_by(SessionNote.created_at.asc()))
+        notes = notes_res.scalars().all()
+
+    # Get messages
+    msg_res = await db.execute(select(Message).where((Message.sender_id == patient.user_id) | (Message.recipient_id == patient.user_id)).order_by(Message.sent_at.asc()))
+    messages = msg_res.scalars().all()
+
+    # Get mood entries
+    mood_res = await db.execute(select(MoodEntry).where(MoodEntry.patient_id == patient_id).order_by(MoodEntry.submitted_at.desc()).limit(10))
+    moods = list(reversed(mood_res.scalars().all()))
+
+    # Build prompt
+    prompt = f"Patient: {patient.first_name} {patient.last_name}\n"
+    prompt += "--- Dernieres entrees d'humeur (PHQ-9) ---\n"
+    for m in moods:
+        prompt += f"[{m.submitted_at.strftime('%Y-%m-%d') if m.submitted_at else 'N/A'}] Score PHQ-9: {m.phq9_score}/27. Notes: {m.notes or 'Aucune'}\n"
+    
+    prompt += "\n--- Notes Cliniques ---\n"
+    for n in notes:
+        prompt += f"[{n.created_at.strftime('%Y-%m-%d') if n.created_at else 'N/A'}] Note: {n.content}\n"
+
+    prompt += "\n--- Messages ---\n"
+    for m in messages:
+        sender = "Patient" if str(m.sender_id) == str(patient.user_id) else "Psychiatre"
+        prompt += f"[{m.sent_at.strftime('%Y-%m-%d %H:%M') if m.sent_at else 'N/A'}] {sender}: {m.content}\n"
+
+    prompt += "\nTu es un assistant medical expert. En te basant sur cet historique, redige une synthese clinique complete en francais. Identifie les tendances de l'humeur, les points cles des notes cliniques, et tire des conclusions sur l'evolution du patient. Fournis des recommandations de suivi."
+
+    api_key = settings.ANTHROPIC_API_KEY
+    if not api_key:
+        return AIAnalysisResponse(
+            patient_id=patient_id,
+            analysis="L'API IA n'est pas configuree (ANTHROPIC_API_KEY manquante). Voici un resumé factuel des données :\n" + prompt,
+            generated_at=datetime.now(timezone.utc).isoformat()
+        )
+
+    try:
+        client = anthropic.AsyncAnthropic(api_key=api_key)
+        response = await client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1000,
+            system="Tu es un assistant psychiatrique. Tu reponds toujours de maniere professionnelle, structuree, et en francais.",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        analysis = response.content[0].text
+    except Exception as exc:
+        logger.error(f"Erreur IA: {exc}")
+        analysis = "Une erreur est survenue lors de la generation de l'analyse."
+
+    return AIAnalysisResponse(
+        patient_id=patient_id,
+        analysis=analysis,
+        generated_at=datetime.now(timezone.utc).isoformat()
+    )
 
 
 # ---------------------------------------------------------------------------

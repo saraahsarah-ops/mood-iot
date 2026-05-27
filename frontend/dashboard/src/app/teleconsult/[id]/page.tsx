@@ -128,7 +128,7 @@ export default function TeleconsultDetailPage() {
       setSession(sessionData);
       const notesList: SessionNote[] = Array.isArray(notesData)
         ? notesData
-        : notesData.notes || [];
+        : (notesData as any).notes || [];
       setNotes(notesList.sort((a, b) =>
         new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
       ));

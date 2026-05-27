@@ -3,8 +3,18 @@ import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import MetricComparison from "@/components/MetricComparison";
 import ScoreChart from "@/components/ScoreChart";
+import ClinicalHistory from "@/components/ClinicalHistory";
+import Messagerie from "@/components/Messagerie";
 import { getRiskEmoji, getRiskLabel } from "@/lib/types";
-import { getPatients, getPatientMetrics, getLatestScore, getScoreHistory } from "@/lib/api";
+import {
+  getPatients,
+  getPatientMetrics,
+  getLatestScore,
+  getScoreHistory,
+  createPatient,
+  updatePatient,
+  deletePatient,
+} from "@/lib/api";
 
 interface PatientOption {
   id: string;
@@ -20,6 +30,24 @@ interface DailyMetrics {
 
 const DEFAULT_BASELINES: DailyMetrics = { steps: 8500, sleep: 7.5, bpm: 68, screen: 3.0 };
 
+interface NewPatientForm {
+  first_name: string;
+  last_name: string;
+  date_of_birth: string;
+  gender: string;
+  email: string;
+  phone: string;
+}
+
+const EMPTY_FORM: NewPatientForm = {
+  first_name: "",
+  last_name: "",
+  date_of_birth: "",
+  gender: "female",
+  email: "",
+  phone: "",
+};
+
 export default function FichePatiente() {
   const searchParams = useSearchParams();
   const initialId = searchParams.get("id");
@@ -32,6 +60,122 @@ export default function FichePatiente() {
   const [chartData, setChartData] = useState<Record<string, string | number>[]>([]);
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<"metrics" | "history" | "messages">("metrics");
+
+  // CRUD state
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [formData, setFormData] = useState<NewPatientForm>(EMPTY_FORM);
+  const [crudLoading, setCrudLoading] = useState(false);
+  const [crudMsg, setCrudMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+
+  function updateField(field: keyof NewPatientForm, value: string) {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+  }
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    setCrudLoading(true);
+    setCrudMsg(null);
+    try {
+      await createPatient({
+        first_name: formData.first_name,
+        last_name: formData.last_name,
+        date_of_birth: formData.date_of_birth,
+        gender: formData.gender,
+        email: formData.email || undefined,
+        phone: formData.phone || undefined,
+      });
+      setCrudMsg({ type: "ok", text: "Patient cree avec succes" });
+      setShowCreateForm(false);
+      setFormData(EMPTY_FORM);
+      // Reload patients list
+      const res = await getPatients(1, 50);
+      const list = (res.patients || []).map((p: any) => ({
+        id: p.id,
+        name: `${p.first_name} ${(p.last_name || "")[0]}.`,
+      }));
+      setPatientsList(list);
+      setTimeout(() => setCrudMsg(null), 3000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erreur";
+      setCrudMsg({ type: "err", text: msg });
+    } finally {
+      setCrudLoading(false);
+    }
+  }
+
+  async function handleUpdate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedId) return;
+    setCrudLoading(true);
+    setCrudMsg(null);
+    try {
+      await updatePatient(selectedId, {
+        first_name: formData.first_name,
+        last_name: formData.last_name,
+        phone: formData.phone || undefined,
+      });
+      setCrudMsg({ type: "ok", text: "Patient mis a jour" });
+      setShowEditForm(false);
+      // Reload
+      const res = await getPatients(1, 50);
+      const list = (res.patients || []).map((p: any) => ({
+        id: p.id,
+        name: `${p.first_name} ${(p.last_name || "")[0]}.`,
+      }));
+      setPatientsList(list);
+      setTimeout(() => setCrudMsg(null), 3000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erreur";
+      setCrudMsg({ type: "err", text: msg });
+    } finally {
+      setCrudLoading(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!selectedId) return;
+    setCrudLoading(true);
+    setCrudMsg(null);
+    try {
+      await deletePatient(selectedId);
+      setCrudMsg({ type: "ok", text: "Patient supprime" });
+      setShowDeleteConfirm(false);
+      // Reload
+      const res = await getPatients(1, 50);
+      const list = (res.patients || []).map((p: any) => ({
+        id: p.id,
+        name: `${p.first_name} ${(p.last_name || "")[0]}.`,
+      }));
+      setPatientsList(list);
+      if (list.length > 0) setSelectedId(list[0].id);
+      else setSelectedId("");
+      setTimeout(() => setCrudMsg(null), 3000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erreur";
+      setCrudMsg({ type: "err", text: msg });
+    } finally {
+      setCrudLoading(false);
+    }
+  }
+
+  function openEdit() {
+    const p = patientsList.find((pt) => pt.id === selectedId);
+    if (!p) return;
+    const parts = p.name.split(" ");
+    setFormData({
+      first_name: parts[0] || "",
+      last_name: parts.slice(1).join(" ").replace(".", "") || "",
+      date_of_birth: "",
+      gender: "",
+      email: "",
+      phone: "",
+    });
+    setShowEditForm(true);
+    setCrudMsg(null);
+  }
 
   // Load patients list
   useEffect(() => {
@@ -140,7 +284,103 @@ export default function FichePatiente() {
             Details cliniques et metriques de sante
           </p>
         </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setShowCreateForm(true); setFormData(EMPTY_FORM); setCrudMsg(null); }}
+            className="rounded-xl bg-primary-500 px-4 py-2 text-[13px] font-semibold text-white shadow-sm transition hover:bg-primary-600 hover:shadow-md active:scale-[0.98]"
+          >
+            + Nouveau patient
+          </button>
+          {selectedId && (
+            <>
+              <button
+                onClick={openEdit}
+                className="rounded-xl border border-primary-200 bg-primary-50 px-3 py-2 text-[13px] font-semibold text-primary-600 transition hover:bg-primary-100"
+              >
+                Modifier
+              </button>
+              <button
+                onClick={() => { setShowDeleteConfirm(true); setCrudMsg(null); }}
+                className="rounded-xl border border-red-200 px-3 py-2 text-[13px] font-semibold text-red-500 transition hover:bg-red-50"
+              >
+                Supprimer
+              </button>
+            </>
+          )}
+        </div>
       </div>
+
+      {/* CRUD feedback message */}
+      {crudMsg && (
+        <div className={`mt-3 rounded-xl border px-4 py-3 text-[13px] ${crudMsg.type === "ok" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-red-200 bg-red-50 text-red-600"}`}>
+          {crudMsg.text}
+        </div>
+      )}
+
+      {/* Create Patient Modal */}
+      {showCreateForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <form onSubmit={handleCreate} className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
+            <h3 className="text-[15px] font-bold text-gray-800">Nouveau patient</h3>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <input type="text" placeholder="Prenom *" value={formData.first_name} onChange={(e) => updateField("first_name", e.target.value)} required className="rounded-xl border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-[13px] text-gray-700 placeholder-gray-400 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20" />
+              <input type="text" placeholder="Nom *" value={formData.last_name} onChange={(e) => updateField("last_name", e.target.value)} required className="rounded-xl border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-[13px] text-gray-700 placeholder-gray-400 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20" />
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-gray-400">Date de naissance *</label>
+                <input type="date" value={formData.date_of_birth} onChange={(e) => updateField("date_of_birth", e.target.value)} required className="w-full rounded-xl border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-[13px] text-gray-700 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20" />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-gray-400">Genre *</label>
+                <select value={formData.gender} onChange={(e) => updateField("gender", e.target.value)} className="w-full rounded-xl border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-[13px] text-gray-700 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20">
+                  <option value="female">Femme</option>
+                  <option value="male">Homme</option>
+                  <option value="other">Autre</option>
+                </select>
+              </div>
+              <input type="email" placeholder="Email (optionnel)" value={formData.email} onChange={(e) => updateField("email", e.target.value)} className="rounded-xl border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-[13px] text-gray-700 placeholder-gray-400 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20" />
+              <input type="tel" placeholder="Telephone (optionnel)" value={formData.phone} onChange={(e) => updateField("phone", e.target.value)} className="rounded-xl border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-[13px] text-gray-700 placeholder-gray-400 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20" />
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setShowCreateForm(false)} className="rounded-xl border border-gray-200 px-4 py-2 text-[13px] font-medium text-gray-600 transition hover:bg-gray-50">Annuler</button>
+              <button type="submit" disabled={crudLoading} className="rounded-xl bg-primary-500 px-5 py-2 text-[13px] font-semibold text-white transition hover:bg-primary-600 disabled:opacity-50">{crudLoading ? "Creation..." : "Creer"}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Edit Patient Modal */}
+      {showEditForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <form onSubmit={handleUpdate} className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h3 className="text-[15px] font-bold text-gray-800">Modifier patient</h3>
+            <div className="mt-4 space-y-3">
+              <input type="text" placeholder="Prenom" value={formData.first_name} onChange={(e) => updateField("first_name", e.target.value)} required className="w-full rounded-xl border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-[13px] text-gray-700 placeholder-gray-400 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20" />
+              <input type="text" placeholder="Nom" value={formData.last_name} onChange={(e) => updateField("last_name", e.target.value)} required className="w-full rounded-xl border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-[13px] text-gray-700 placeholder-gray-400 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20" />
+              <input type="tel" placeholder="Telephone" value={formData.phone} onChange={(e) => updateField("phone", e.target.value)} className="w-full rounded-xl border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-[13px] text-gray-700 placeholder-gray-400 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20" />
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setShowEditForm(false)} className="rounded-xl border border-gray-200 px-4 py-2 text-[13px] font-medium text-gray-600 transition hover:bg-gray-50">Annuler</button>
+              <button type="submit" disabled={crudLoading} className="rounded-xl bg-primary-500 px-5 py-2 text-[13px] font-semibold text-white transition hover:bg-primary-600 disabled:opacity-50">{crudLoading ? "Sauvegarde..." : "Enregistrer"}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+            <h3 className="text-[15px] font-bold text-gray-800">Confirmer la suppression</h3>
+            <p className="mt-2 text-[13px] text-gray-500">
+              Voulez-vous vraiment supprimer <span className="font-semibold text-gray-700">{selectedName}</span> et toutes ses donnees associees ? Cette action est irreversible.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setShowDeleteConfirm(false)} className="rounded-xl border border-gray-200 px-4 py-2 text-[13px] font-medium text-gray-600 transition hover:bg-gray-50">Annuler</button>
+              <button onClick={handleDelete} disabled={crudLoading} className="rounded-xl bg-red-500 px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-red-600 disabled:opacity-50">{crudLoading ? "Suppression..." : "Supprimer"}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Patient selector + score card */}
       <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-center">
@@ -173,98 +413,110 @@ export default function FichePatiente() {
         </div>
       </div>
 
-      {/* Metriques vs baseline */}
-      <div className="mt-8">
-        <div className="flex items-center gap-2">
-          <h2 className="text-[15px] font-bold text-gray-700">
-            Metriques vs Baseline
-          </h2>
-          <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-500">
-            Derniere journee
-          </span>
-        </div>
-        <div className="mt-3 grid grid-cols-2 gap-3 xl:grid-cols-4">
-          <MetricComparison
-            emoji="👟"
-            label="Pas"
-            current={metrics.steps}
-            baseline={baselines.steps}
-            unit="pas"
-            higherIsBetter={true}
-          />
-          <MetricComparison
-            emoji="😴"
-            label="Sommeil"
-            current={metrics.sleep}
-            baseline={baselines.sleep}
-            unit="h"
-            higherIsBetter={true}
-          />
-          <MetricComparison
-            emoji="❤️"
-            label="BPM"
-            current={metrics.bpm}
-            baseline={baselines.bpm}
-            unit="bpm"
-            higherIsBetter={false}
-          />
-          <MetricComparison
-            emoji="📱"
-            label="Ecran"
-            current={metrics.screen}
-            baseline={baselines.screen}
-            unit="h"
-            higherIsBetter={false}
-          />
-        </div>
+      {/* Tabs */}
+      <div className="mt-8 mb-4 flex border-b border-gray-200">
+        <button
+          onClick={() => setActiveTab("metrics")}
+          className={`px-4 py-2 text-[14px] font-semibold transition ${activeTab === "metrics" ? "border-b-2 border-primary-500 text-primary-600" : "text-gray-500 hover:text-gray-700"}`}
+        >
+          Métriques & Santé
+        </button>
+        <button
+          onClick={() => setActiveTab("history")}
+          className={`px-4 py-2 text-[14px] font-semibold transition ${activeTab === "history" ? "border-b-2 border-primary-500 text-primary-600" : "text-gray-500 hover:text-gray-700"}`}
+        >
+          Historique Clinique & IA
+        </button>
+        <button
+          onClick={() => setActiveTab("messages")}
+          className={`px-4 py-2 text-[14px] font-semibold transition ${activeTab === "messages" ? "border-b-2 border-primary-500 text-primary-600" : "text-gray-500 hover:text-gray-700"}`}
+        >
+          Messagerie
+        </button>
       </div>
 
-      {/* Graphique evolution score */}
-      <div className="mt-8">
-        <div className="flex items-center justify-between">
-          <h2 className="text-[15px] font-bold text-gray-700">
-            Evolution du score
-          </h2>
-          <span className="text-[12px] text-gray-400">Historique</span>
-        </div>
-        <div className="mt-3 rounded-2xl border border-gray-100 bg-white p-5 shadow-card">
-          {chartData.length > 0 ? (
-            <ScoreChart data={chartData} height={280} />
-          ) : (
-            <p className="py-10 text-center text-[13px] text-gray-400">
-              {loading
-                ? "Chargement..."
-                : "Aucun historique de scores disponible"}
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* Notes du medecin */}
-      <div className="mt-8">
-        <h2 className="text-[15px] font-bold text-gray-700">
-          Analyse du medecin
-        </h2>
-        <div className="mt-3 rounded-2xl border border-gray-100 bg-white p-5 shadow-card">
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Ecrivez votre analyse clinique ici..."
-            className="w-full rounded-xl border border-gray-200 bg-gray-50/50 p-4 text-[13px] text-gray-700 placeholder-gray-400 transition focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20"
-            rows={4}
-          />
-          <div className="mt-3 flex items-center justify-between">
-            <p className="text-[11px] text-gray-400">
-              {notes.length > 0
-                ? `${notes.length} caracteres`
-                : "Aucune note enregistree"}
-            </p>
-            <button className="rounded-xl bg-primary-500 px-5 py-2 text-[13px] font-semibold text-white shadow-sm transition hover:bg-primary-600 hover:shadow-md active:scale-[0.98]">
-              Enregistrer
-            </button>
+      {activeTab === "metrics" && (
+        <>
+          {/* Metriques vs baseline */}
+          <div className="mt-4">
+            <div className="flex items-center gap-2">
+              <h2 className="text-[15px] font-bold text-gray-700">
+                Metriques vs Baseline
+              </h2>
+              <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-500">
+                Derniere journee
+              </span>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-3 xl:grid-cols-4">
+              <MetricComparison
+                emoji="👟"
+                label="Pas"
+                current={metrics.steps}
+                baseline={baselines.steps}
+                unit="pas"
+                higherIsBetter={true}
+              />
+              <MetricComparison
+                emoji="😴"
+                label="Sommeil"
+                current={metrics.sleep}
+                baseline={baselines.sleep}
+                unit="h"
+                higherIsBetter={true}
+              />
+              <MetricComparison
+                emoji="❤️"
+                label="BPM"
+                current={metrics.bpm}
+                baseline={baselines.bpm}
+                unit="bpm"
+                higherIsBetter={false}
+              />
+              <MetricComparison
+                emoji="📱"
+                label="Ecran"
+                current={metrics.screen}
+                baseline={baselines.screen}
+                unit="h"
+                higherIsBetter={false}
+              />
+            </div>
           </div>
+
+          {/* Graphique evolution score */}
+          <div className="mt-8">
+            <div className="flex items-center justify-between">
+              <h2 className="text-[15px] font-bold text-gray-700">
+                Evolution du score
+              </h2>
+              <span className="text-[12px] text-gray-400">Historique</span>
+            </div>
+            <div className="mt-3 rounded-2xl border border-gray-100 bg-white p-5 shadow-card">
+              {chartData.length > 0 ? (
+                <ScoreChart data={chartData} height={280} />
+              ) : (
+                <p className="py-10 text-center text-[13px] text-gray-400">
+                  {loading
+                    ? "Chargement..."
+                    : "Aucun historique de scores disponible"}
+                </p>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {activeTab === "history" && selectedId && (
+        <div className="mt-4">
+          <ClinicalHistory patientId={selectedId} />
         </div>
-      </div>
+      )}
+
+      {activeTab === "messages" && selectedId && (
+        <div className="mt-4">
+          <Messagerie patientId={selectedId} />
+        </div>
+      )}
     </div>
   );
 }

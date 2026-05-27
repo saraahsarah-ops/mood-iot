@@ -8,6 +8,18 @@
 -- ──────────────────────────────────────────────────────────────────────────────
 
 CREATE TYPE user_role AS ENUM ('patient', 'psychiatre', 'admin');
+CREATE TYPE registration_status AS ENUM ('pending_approval', 'approved', 'rejected');
+
+CREATE TABLE institutions (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            VARCHAR(255) NOT NULL,
+    siret           VARCHAR(20) UNIQUE,
+    address         TEXT,
+    phone           VARCHAR(20),
+    admin_user_id   UUID,
+    is_active       BOOLEAN DEFAULT true,
+    created_at      TIMESTAMPTZ DEFAULT now()
+);
 
 CREATE TABLE users (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -17,8 +29,29 @@ CREATE TABLE users (
     mfa_enabled     BOOLEAN DEFAULT false,
     mfa_secret      VARCHAR(255),
     is_active       BOOLEAN DEFAULT true,
+    registration_status registration_status DEFAULT 'approved' NOT NULL,
+    rgpd_consent_at TIMESTAMPTZ,
+    institution_id  UUID REFERENCES institutions(id) ON DELETE SET NULL,
     created_at      TIMESTAMPTZ DEFAULT now(),
     updated_at      TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE institutions ADD CONSTRAINT fk_institutions_admin FOREIGN KEY (admin_user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+CREATE TABLE doctor_profiles (
+    id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id                     UUID UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    first_name                  VARCHAR(100) NOT NULL,
+    last_name                   VARCHAR(100) NOT NULL,
+    speciality                  VARCHAR(100) DEFAULT 'Psychiatrie',
+    rpps_number_encrypted       VARCHAR(500),
+    license_number_encrypted    VARCHAR(500),
+    certification_file_path     VARCHAR(500),
+    approval_note               TEXT,
+    approved_by                 UUID REFERENCES users(id) ON DELETE SET NULL,
+    approved_at                 TIMESTAMPTZ,
+    created_at                  TIMESTAMPTZ DEFAULT now(),
+    updated_at                  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE refresh_tokens (
@@ -254,4 +287,13 @@ CREATE TABLE session_notes (
     alert_feedback          alert_feedback_type,
     treatment_adjustment    TEXT,
     created_at              TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE messages (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    sender_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    content         TEXT NOT NULL,
+    sent_at         TIMESTAMPTZ DEFAULT now(),
+    read_at         TIMESTAMPTZ
 );

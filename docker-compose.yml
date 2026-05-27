@@ -62,6 +62,7 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql://mood_user:mood_secret_2026@postgres:5432/mood_iot}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-LTDNcEcwfj3wHgE7UFOVjF3kK1p7qV669cOyoF8rf-Y=}
       - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
       - ENVIRONMENT=docker
     depends_on:
@@ -89,6 +90,7 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql://mood_user:mood_secret_2026@postgres:5432/mood_iot}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-LTDNcEcwfj3wHgE7UFOVjF3kK1p7qV669cOyoF8rf-Y=}
       - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-60}
       - JWT_REFRESH_TOKEN_EXPIRE_DAYS=${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-7}
     depends_on:
@@ -116,6 +118,7 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql://mood_user:mood_secret_2026@postgres:5432/mood_iot}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-LTDNcEcwfj3wHgE7UFOVjF3kK1p7qV669cOyoF8rf-Y=}
     depends_on:
       postgres:
         condition: service_healthy
@@ -139,6 +142,7 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql://mood_user:mood_secret_2026@postgres:5432/mood_iot}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-LTDNcEcwfj3wHgE7UFOVjF3kK1p7qV669cOyoF8rf-Y=}
       - SCORING_THRESHOLDS=${SCORING_THRESHOLDS:-40/60/80}
       - MODEL_S3_BUCKET=${MODEL_S3_BUCKET:-mood-iot-models}
       - SCORING_DISABLE_XGBOOST=${SCORING_DISABLE_XGBOOST:-false}
@@ -168,6 +172,7 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql://mood_user:mood_secret_2026@postgres:5432/mood_iot}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-LTDNcEcwfj3wHgE7UFOVjF3kK1p7qV669cOyoF8rf-Y=}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
       - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
@@ -197,8 +202,33 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql://mood_user:mood_secret_2026@postgres:5432/mood_iot}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-LTDNcEcwfj3wHgE7UFOVjF3kK1p7qV669cOyoF8rf-Y=}
       - JITSI_SERVER_URL=${JITSI_SERVER_URL:-https://meet.jit.si}
       - JITSI_JWT_SECRET=${JITSI_JWT_SECRET:-change-me}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - mood-iot-network
+
+  # ── Doctor Service (port 8006) ───────────────────────────────────────────
+  doctor-service:
+    build:
+      context: ./backend
+      dockerfile: infrastructure/docker/Dockerfile
+      args:
+        SERVICE_NAME: doctor
+    container_name: mood-iot-doctor
+    restart: unless-stopped
+    ports:
+      - "8016:8006"
+    environment:
+      - SERVICE_NAME=doctor
+      - SERVICE_PORT=8006
+      - DATABASE_URL=${DATABASE_URL:-postgresql://mood_user:mood_secret_2026@postgres:5432/mood_iot}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-LTDNcEcwfj3wHgE7UFOVjF3kK1p7qV669cOyoF8rf-Y=}
     depends_on:
       postgres:
         condition: service_healthy

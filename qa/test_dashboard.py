@@ -25,7 +25,11 @@ EVIDENCIAS.mkdir(exist_ok=True)
 
 DASHBOARD_URL = "http://localhost:3000"
 EMAIL = "dr.martin@mood-iot.fr"
-PASSWORD = "MoodIoT2026!"
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+PASSWORD = os.getenv("TEST_USER_PASSWORD", "MoodIoT2026!")
 
 
 async def run_tests():

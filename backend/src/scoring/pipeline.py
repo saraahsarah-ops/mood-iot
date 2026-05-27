@@ -78,9 +78,9 @@ HEURISTIC_WEIGHTS: dict[str, float] = {
     "z_sleep_quality": 0.15,
     "z_heart_rate": 0.15,
     "z_hrv": 0.15,
-    "z_step_count": 0.10,
+    "z_step_count": 0.15,     # Aumentado (antes 0.10) para absorber colinealidad
     "z_gps_radius": 0.10,
-    "z_screen_time": 0.10,
+    "z_screen_time": 0.05,    # Reducido (antes 0.10) para mitigar feature leakage
     "z_call_frequency": 0.05,
 }
 
@@ -409,6 +409,18 @@ class ScoringPipeline:
             if current_value is None:
                 logger.debug("Metrique '%s' absente des agregats", metric_col)
                 continue
+
+            # -- Outlier Rejection --
+            # Filtro básico de anomalías de hardware (Smartwatch error)
+            if metric_col == "heart_rate_avg" and float(current_value) <= 30:
+                logger.warning("Rejet de valeur aberrante pour heart_rate: %.1f", current_value)
+                continue
+            if metric_col == "sleep_duration_min" and float(current_value) <= 0:
+                logger.warning("Rejet de valeur aberrante pour sleep: %.1f", current_value)
+                continue
+            if metric_col == "step_count" and float(current_value) < 0:
+                continue
+            # -----------------------
 
             baseline = baselines.get(metric_name)
             if baseline is None:

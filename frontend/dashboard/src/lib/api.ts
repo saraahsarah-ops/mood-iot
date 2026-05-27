@@ -6,6 +6,7 @@ async function fetcher<T>(path: string, options?: RequestInit): Promise<T> {
   const token =
     typeof window !== "undefined" ? localStorage.getItem("mood_token") : null;
   const res = await fetch(`${API_URL}${path}`, {
+    cache: "no-store",
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -282,4 +283,22 @@ export function connectAlertWS(
   const ws = new WebSocket(`${wsUrl}/notifications/ws/${userId}`);
   ws.onmessage = (event) => onMessage(JSON.parse(event.data));
   return ws;
+}
+
+/* ── Historique et Messagerie ─────────────────────────── */
+export async function getPatientHistory(patientId: string) {
+  return fetcher<any>(`/teleconsult/history/${patientId}`);
+}
+
+export async function sendDirectMessage(patientId: string, content: string) {
+  return fetcher<any>(`/teleconsult/messages/${patientId}`, {
+    method: "POST",
+    body: JSON.stringify({ content }),
+  });
+}
+
+export async function generateAIAnalysis(patientId: string) {
+  return fetcher<any>(`/notifications/ai-analysis/${patientId}`, {
+    method: "POST"
+  });
 }

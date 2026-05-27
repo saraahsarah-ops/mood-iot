@@ -330,9 +330,27 @@ async def create_patient(
     current_user: dict = Depends(require_role("psychiatre", "admin")),
 ):
     """Creer un nouveau dossier patient."""
+    import uuid
+    import secrets
+    import bcrypt
+    
     db_gender = GENDER_MAP.get(payload.gender.value, "autre")
+    
+    user_email = payload.email or f"patient_{uuid.uuid4().hex[:8]}@mood-iot.local"
+    password = secrets.token_urlsafe(12)
+    password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    
+    user = User(
+        email=user_email,
+        password_hash=password_hash,
+        role="patient",
+        mfa_enabled=False,
+    )
+    db.add(user)
+    await db.flush()
 
     patient = Patient(
+        user_id=user.id,
         first_name=payload.first_name,
         last_name=payload.last_name,
         date_of_birth=date.fromisoformat(payload.date_of_birth) if payload.date_of_birth else None,
@@ -422,6 +440,18 @@ async def update_patient(
     if patient is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient introuvable")
 
+    if current_user["role"] == "psychiatre":
+        check = await db.execute(
+            select(PatientPsychiatrist).where(
+                and_(
+                    PatientPsychiatrist.patient_id == patient_id,
+                    PatientPsychiatrist.psychiatrist_id == current_user["user_id"],
+                )
+            )
+        )
+        if check.scalar_one_or_none() is None:
+            raise HTTPException(status_code=403, detail="Vous n'etes pas assigne a ce patient")
+
     if payload.first_name is not None:
         patient.first_name = payload.first_name
     if payload.last_name is not None:
@@ -431,6 +461,7 @@ async def update_patient(
 
     patient.updated_at = datetime.now(timezone.utc)
     await db.flush()
+    await db.commit()
 
     psych_id = await _get_primary_psychiatrist(patient_id, db)
     email = await _get_patient_email(patient.user_id, db)
@@ -550,9 +581,13 @@ async def submit_mood_entry(
 ):
     """Soumettre une entree d'humeur PHQ-9."""
     # Verify patient exists
-    pat_result = await db.execute(select(Patient.id).where(Patient.id == patient_id))
-    if pat_result.scalar_one_or_none() is None:
+    pat_result = await db.execute(select(Patient).where(Patient.id == patient_id))
+    patient = pat_result.scalar_one_or_none()
+    if patient is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient introuvable")
+        
+    if current_user["role"] == "patient" and str(patient.user_id) != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Acces refuse - Vous ne pouvez modifier que vos propres donnees")
 
     # Validate scores range
     for score in payload.phq9_scores:
@@ -606,9 +641,13 @@ async def get_consents(
     current_user: dict = Depends(get_current_user),
 ):
     """Recuperer les consentements d'un patient."""
-    pat_result = await db.execute(select(Patient.id).where(Patient.id == patient_id))
-    if pat_result.scalar_one_or_none() is None:
+    pat_result = await db.execute(select(Patient).where(Patient.id == patient_id))
+    patient = pat_result.scalar_one_or_none()
+    if patient is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient introuvable")
+        
+    if current_user["role"] == "patient" and str(patient.user_id) != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Acces refuse - Vous ne pouvez voir que vos propres donnees")
 
     result = await db.execute(
         select(Consent).where(Consent.patient_id == patient_id)
@@ -642,9 +681,13 @@ async def update_consents(
     current_user: dict = Depends(get_current_user),
 ):
     """Mettre a jour les consentements d'un patient."""
-    pat_result = await db.execute(select(Patient.id).where(Patient.id == patient_id))
-    if pat_result.scalar_one_or_none() is None:
+    pat_result = await db.execute(select(Patient).where(Patient.id == patient_id))
+    patient = pat_result.scalar_one_or_none()
+    if patient is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient introuvable")
+        
+    if current_user["role"] == "patient" and str(patient.user_id) != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Acces refuse - Vous ne pouvez modifier que vos propres donnees")
 
     now = datetime.now(timezone.utc)
     payload_dict = payload.model_dump()
