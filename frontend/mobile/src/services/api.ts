@@ -1,50 +1,90 @@
-import * as SecureStore from "expo-secure-store";
+/**
+ * Client HTTP du backend Mood-IoT.
+ *
+ * - Récupère un access token Keycloak frais via authStore (refresh transparent)
+ * - Injecte `Authorization: Bearer <token>` sur chaque requête authentifiée
+ * - Sur 401 : tente un refresh + retry une fois, puis force la déconnexion
+ */
+
+import { useAuthStore } from "@/stores/authStore";
+import type { AppUser } from "@/stores/authStore";
 
 const API_BASE = process.env.EXPO_PUBLIC_API_URL || "http://localhost:8000";
 
-async function getToken(): Promise<string | null> {
-  return SecureStore.getItemAsync("auth_token");
+interface RequestOptions extends RequestInit {
+  /** Désactive l'injection automatique du token (endpoints publics). */
+  skipAuth?: boolean;
+  /** Token explicite (utilisé par `fetchMe` pendant le bootstrap). */
+  bearer?: string;
 }
 
-async function request<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
-  const token = await getToken();
+async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { skipAuth, bearer, ...init } = options;
+
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    ...(options.headers as Record<string, string>),
+    ...((init.headers as Record<string, string>) ?? {}),
   };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  if (!skipAuth) {
+    const token =
+      bearer ?? (await useAuthStore.getState().getValidAccessToken());
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+  }
 
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+
+  if (res.status === 401 && !skipAuth && !bearer) {
+    // Try one refresh + retry (the store will clear tokens if refresh fails)
+    const fresh = await useAuthStore.getState().getValidAccessToken();
+    if (fresh) {
+      headers["Authorization"] = `Bearer ${fresh}`;
+      const retry = await fetch(`${API_BASE}${path}`, { ...init, headers });
+      return handleResponse<T>(retry);
+    }
+  }
+
+  return handleResponse<T>(res);
+}
+
+async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(`API ${res.status}: ${body}`);
   }
-
-  return res.json();
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
 }
 
 /* ── Auth ──────────────────────────────────────── */
 
-export interface LoginResponse {
-  access_token: string;
-  token_type: string;
-  user: {
-    id: string;
-    email: string;
-    first_name: string;
-    last_name: string;
-    role: string;
-  };
+/**
+ * Profil interne (users + patient/doctor) déduit du token Keycloak.
+ * Si 404 : l'utilisateur doit POST /auth/register-profile pour finaliser.
+ */
+export async function fetchMe(bearer?: string): Promise<AppUser> {
+  return request<AppUser>("/auth/me", { bearer });
 }
 
-export async function login(email: string, password: string): Promise<LoginResponse> {
-  return request("/auth/login", {
+export interface RegisterProfilePayload {
+  role: "patient" | "psychiatre";
+  first_name: string;
+  last_name: string;
+  date_of_birth?: string; // ISO YYYY-MM-DD
+  gender?: "M" | "F" | "autre";
+  rpps_number?: string;
+  license_number?: string;
+  speciality?: string;
+}
+
+export async function registerProfile(
+  payload: RegisterProfilePayload,
+  bearer: string,
+): Promise<AppUser> {
+  return request<AppUser>("/auth/register-profile", {
     method: "POST",
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify(payload),
+    bearer,
   });
 }
 
@@ -115,7 +155,7 @@ export async function syncHealthDataBatch(
   });
 }
 
-/* ── PHQ-9 ────────────────────────────────────── */
+/* ── PHQ-9 (questionnaire clinique — conservé tel quel) ──────────── */
 
 export async function submitPhq9(
   patientId: string,
@@ -138,6 +178,8 @@ export interface PatientNotification {
   created_at: string;
 }
 
-export async function getNotifications(patientId: string): Promise<PatientNotification[]> {
+export async function getNotifications(
+  patientId: string,
+): Promise<PatientNotification[]> {
   return request(`/notifications/${patientId}?channel=push_fcm`);
 }

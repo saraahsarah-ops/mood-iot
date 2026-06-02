@@ -1,32 +1,42 @@
 """
-Mood-IoT : Service d'Authentification (port 8001).
-Gestion des utilisateurs, JWT, MFA (TOTP).
-Utilise PostgreSQL via SQLAlchemy async + bcrypt + pyotp.
+Mood-IoT : Service d'Authentification (port 8001) — version Keycloak.
+
+Depuis la migration `feature/auth-keycloak`, l'identité est gérée par
+Keycloak (réalm `moodiot` hébergé sur auth.moodiot.fr).
+
+Ce service ne fait plus de login / refresh / MFA : il expose uniquement
+3 endpoints applicatifs :
+
+  - GET  /auth/me              → profil interne déduit du token Keycloak
+  - POST /auth/register-profile → création profil patient/médecin au 1er login
+  - POST /auth/sync             → mise à jour email/nom si modifiés côté Keycloak
+
+Toute l'UI de login, OAuth Google/Apple, TOTP MFA, reset password, email verify
+est rendue par Keycloak (FR via realm theme).
 """
 
-from datetime import datetime, timezone
-from typing import Optional
-from uuid import uuid4
+from __future__ import annotations
 
-from fastapi import FastAPI, Depends, HTTPException, status
+from datetime import date, datetime, timezone
+from typing import Optional
+
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
-import bcrypt
-import pyotp
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.shared.config import settings
-from src.shared.auth import (
-    create_access_token,
-    create_refresh_token,
-    decode_token,
-    get_current_user,
-    security,
-)
+from src.shared.auth import current_user_uuid, get_current_user
+from src.shared.audit import log_action
 from src.shared.database import get_db
-from src.shared.models import User, UserRole as DBUserRole, DoctorProfile, RegistrationStatus
-from src.shared.password_policy import validate_password_strength
+from src.shared.keycloak import extract_roles, verify_access_token
+from src.shared.models import (
+    DoctorProfile,
+    Patient,
+    RegistrationStatus,
+    User,
+    UserRole as DBUserRole,
+)
 
 # ---------------------------------------------------------------------------
 # Application
@@ -34,8 +44,12 @@ from src.shared.password_policy import validate_password_strength
 
 app = FastAPI(
     title="Mood-IoT Auth Service",
-    version="1.0.0",
-    description="Service d'authentification et de gestion des utilisateurs",
+    version="2.0.0",
+    description=(
+        "Service d'authentification adossé à Keycloak. "
+        "Le backend ne fait que vérifier les access tokens — toutes les "
+        "opérations de gestion d'identité passent par auth.moodiot.fr."
+    ),
 )
 
 app.add_middleware(
@@ -46,252 +60,81 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------------------------------------------------------------------
-# Password hashing (bcrypt direct — avoids passlib compatibility issues)
-# ---------------------------------------------------------------------------
-
-
-def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-
-
-def verify_password(password: str, hashed: str) -> bool:
-    try:
-        return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
-    except Exception:
-        return False
 
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
 
 
-import enum as _enum
-
-
-class UserRoleEnum(str, _enum.Enum):
-    patient = "patient"
-    psychiatre = "psychiatre"
-    admin = "admin"
-
-
-class RegisterRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(..., min_length=8)
-    role: UserRoleEnum = UserRoleEnum.patient
-    first_name: str = Field(..., min_length=1, max_length=100)
-    last_name: str = Field(..., min_length=1, max_length=100)
-
-
-class RegisterResponse(BaseModel):
-    id: str
-    email: str
-    role: str
-    first_name: str
-    last_name: str
-    created_at: str
-
-
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-
-class LoginResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-    expires_in: int
-    user: dict
-
-
-class TokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-    expires_in: int
-
-
-class RefreshRequest(BaseModel):
-    refresh_token: str
-
-
-class MFASetupResponse(BaseModel):
-    secret: str
-    qr_code_url: str
-    message: str
-
-
-class MFAVerifyRequest(BaseModel):
-    code: str = Field(..., min_length=6, max_length=6)
-
-
-class MFAVerifyResponse(BaseModel):
-    verified: bool
-    message: str
-
-
 class UserResponse(BaseModel):
     id: str
+    keycloak_id: str
     email: str
     role: str
     first_name: str
     last_name: str
     mfa_enabled: bool
+    registration_status: str
     created_at: str
 
 
-class MessageResponse(BaseModel):
-    message: str
+class RegisterProfileRequest(BaseModel):
+    """Payload envoyé par l'app mobile lors du tout premier login Keycloak."""
+
+    role: str = Field(..., pattern="^(patient|psychiatre)$")
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str = Field(..., min_length=1, max_length=100)
+    # Champs spécifiques patient
+    date_of_birth: Optional[date] = None
+    gender: Optional[str] = Field(None, pattern="^(M|F|autre)$")
+    # Champs spécifiques médecin
+    rpps_number: Optional[str] = None
+    license_number: Optional[str] = None
+    speciality: Optional[str] = None
+
+
+class SyncRequest(BaseModel):
+    """Payload optionnel : sync du nom si modifié côté Keycloak."""
+
+    first_name: Optional[str] = Field(None, min_length=1, max_length=100)
+    last_name: Optional[str] = Field(None, min_length=1, max_length=100)
 
 
 # ---------------------------------------------------------------------------
-# In-memory blacklist (TODO: move to Redis for distributed invalidation)
+# Helpers
 # ---------------------------------------------------------------------------
 
-_blacklisted_tokens: set[str] = set()
+
+async def _resolve_name(user: User, db: AsyncSession) -> tuple[str, str]:
+    """Return (first_name, last_name) from the patient or doctor profile."""
+    if user.role == DBUserRole.patient:
+        res = await db.execute(select(Patient).where(Patient.user_id == user.id))
+        profile = res.scalar_one_or_none()
+        if profile:
+            return profile.first_name, profile.last_name
+    elif user.role in (DBUserRole.psychiatre, DBUserRole.admin):
+        res = await db.execute(
+            select(DoctorProfile).where(DoctorProfile.user_id == user.id)
+        )
+        profile = res.scalar_one_or_none()
+        if profile:
+            return profile.first_name, profile.last_name
+    fallback = user.email.split("@")[0] if user.email else ""
+    return fallback, ""
+
 
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 
-@app.post(
-    "/auth/register",
-    response_model=RegisterResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    """Enregistrer un nouvel utilisateur."""
-    # Validation de la robustesse du mot de passe
-    try:
-        validate_password_strength(payload.password)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        )
-
-    # Check duplicate
-    result = await db.execute(select(User).where(User.email == payload.email))
-    if result.scalar_one_or_none() is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Un compte avec cet email existe deja",
-        )
-
-    user = User(
-        email=payload.email,
-        password_hash=hash_password(payload.password),
-        role=DBUserRole(payload.role.value),
-        mfa_enabled=False,
-    )
-    db.add(user)
-    await db.flush()
-
-    return RegisterResponse(
-        id=str(user.id),
-        email=user.email,
-        role=user.role.value,
-        first_name=payload.first_name,
-        last_name=payload.last_name,
-        created_at=user.created_at.isoformat() if user.created_at else datetime.now(timezone.utc).isoformat(),
-    )
-
-
-@app.post("/auth/login")
-async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
-    """Connexion - retourne access_token + refresh_token + user info."""
-    result = await db.execute(select(User).where(User.email == payload.email))
-    user = result.scalar_one_or_none()
-
-    if user is None or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Email ou mot de passe incorrect",
-        )
-
-    # Bloquer les comptes non approuves (psychiatres en attente)
-    if hasattr(user, "registration_status") and user.registration_status is not None:
-        if user.registration_status == RegistrationStatus.pending_approval:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Votre compte est en attente d'approbation par un administrateur.",
-            )
-        if user.registration_status == RegistrationStatus.rejected:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Votre inscription a ete rejetee. Contactez l'administrateur.",
-            )
-
-    access_token = create_access_token(str(user.id), user.role.value)
-    refresh_token = create_refresh_token(str(user.id))
-
-    # Resoudre le nom depuis patient ou doctor profile
-    first_name = user.email.split("@")[0]
-    last_name = ""
-    if user.role == DBUserRole.patient:
-        from src.shared.models import Patient
-        pat_result = await db.execute(
-            select(Patient).where(Patient.user_id == user.id)
-        )
-        patient = pat_result.scalar_one_or_none()
-        if patient:
-            first_name = patient.first_name
-            last_name = patient.last_name
-    elif user.role in (DBUserRole.psychiatre, DBUserRole.admin):
-        doc_result = await db.execute(
-            select(DoctorProfile).where(DoctorProfile.user_id == user.id)
-        )
-        doctor = doc_result.scalar_one_or_none()
-        if doctor:
-            first_name = doctor.first_name
-            last_name = doctor.last_name
-
-    # Audit log
-    from src.shared.audit import log_action
-    await log_action(
-        db,
-        user_id=str(user.id),
-        action="login",
-        resource="session",
-        details={"email": user.email, "role": user.role.value},
-    )
-    await db.commit()
-
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-        "expires_in": settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        "user": {
-            "id": str(user.id),
-            "email": user.email,
-            "role": user.role.value,
-            "first_name": first_name,
-            "last_name": last_name,
-        },
-    }
-
-
-@app.post("/auth/refresh", response_model=TokenResponse)
-async def refresh_token(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
-    """Renouveler les tokens via un refresh_token valide."""
-    token_payload = decode_token(payload.refresh_token)
-
-    if token_payload.get("type") != "refresh":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token de type invalide, refresh attendu",
-        )
-
-    if payload.refresh_token in _blacklisted_tokens:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token revoque",
-        )
-
-    user_id = token_payload["sub"]
+@app.get("/auth/me", response_model=UserResponse)
+async def get_me(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Profil interne déduit du token Keycloak fourni en Bearer."""
+    user_id = current_user_uuid(current_user)
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None:
@@ -300,120 +143,213 @@ async def refresh_token(payload: RefreshRequest, db: AsyncSession = Depends(get_
             detail="Utilisateur introuvable",
         )
 
-    # Blacklist old refresh token
-    _blacklisted_tokens.add(payload.refresh_token)
-
-    access_token = create_access_token(str(user.id), user.role.value)
-    new_refresh = create_refresh_token(str(user.id))
-
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=new_refresh,
-        expires_in=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-    )
-
-
-@app.post("/auth/mfa/setup", response_model=MFASetupResponse)
-async def mfa_setup(
-    current_user: dict = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Configurer l'authentification multi-facteurs (TOTP)."""
-    result = await db.execute(select(User).where(User.id == current_user["user_id"]))
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Utilisateur introuvable")
-
-    secret = pyotp.random_base32()
-    user.mfa_secret = secret
-    await db.flush()
-
-    totp = pyotp.TOTP(secret)
-    qr_url = totp.provisioning_uri(name=user.email, issuer_name="Mood-IoT")
-
-    return MFASetupResponse(
-        secret=secret,
-        qr_code_url=qr_url,
-        message="Scannez le QR code avec votre application d'authentification",
-    )
-
-
-@app.post("/auth/mfa/verify", response_model=MFAVerifyResponse)
-async def mfa_verify(
-    payload: MFAVerifyRequest,
-    current_user: dict = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Verifier un code TOTP et activer la MFA."""
-    result = await db.execute(select(User).where(User.id == current_user["user_id"]))
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Utilisateur introuvable")
-
-    if user.mfa_secret is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="MFA non configuree, appelez /auth/mfa/setup d'abord",
-        )
-
-    totp = pyotp.TOTP(user.mfa_secret)
-    is_valid = totp.verify(payload.code)
-
-    if is_valid:
-        user.mfa_enabled = True
-        await db.flush()
-
-    return MFAVerifyResponse(
-        verified=is_valid,
-        message="MFA activee avec succes" if is_valid else "Code invalide",
-    )
-
-
-@app.delete("/auth/logout", response_model=MessageResponse)
-async def logout(current_user: dict = Depends(get_current_user)):
-    """Deconnexion - blackliste le token courant."""
-    return MessageResponse(message="Deconnexion reussie")
-
-
-@app.get("/auth/me", response_model=UserResponse)
-async def get_me(
-    current_user: dict = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Recuperer les informations de l'utilisateur connecte."""
-    result = await db.execute(select(User).where(User.id == current_user["user_id"]))
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Utilisateur introuvable")
-
-    # Resoudre le nom depuis patient ou doctor profile
-    first_name = user.email.split("@")[0]
-    last_name = ""
-    if user.role == DBUserRole.patient:
-        from src.shared.models import Patient
-        pat_result = await db.execute(
-            select(Patient).where(Patient.user_id == user.id)
-        )
-        patient = pat_result.scalar_one_or_none()
-        if patient:
-            first_name = patient.first_name
-            last_name = patient.last_name
-    elif user.role in (DBUserRole.psychiatre, DBUserRole.admin):
-        doc_result = await db.execute(
-            select(DoctorProfile).where(DoctorProfile.user_id == user.id)
-        )
-        doctor = doc_result.scalar_one_or_none()
-        if doctor:
-            first_name = doctor.first_name
-            last_name = doctor.last_name
+    first_name, last_name = await _resolve_name(user, db)
 
     return UserResponse(
         id=str(user.id),
+        keycloak_id=current_user["keycloak_id"],
         email=user.email,
         role=user.role.value,
         first_name=first_name,
         last_name=last_name,
         mfa_enabled=user.mfa_enabled,
+        registration_status=(
+            user.registration_status.value
+            if user.registration_status is not None
+            else "approved"
+        ),
+        created_at=user.created_at.isoformat() if user.created_at else "",
+    )
+
+
+@app.post(
+    "/auth/register-profile",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def register_profile(
+    payload: RegisterProfileRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Crée le profil interne (users + patient/doctor_profile) après le tout
+    premier sign-in Keycloak. Idempotent : si la ligne existe déjà, met à
+    jour les champs métier puis renvoie le profil.
+
+    Le token Keycloak doit être passé en Bearer. On le vérifie à la main car
+    `get_current_user` exige déjà un profil existant en base.
+    """
+    auth = request.headers.get("authorization", "")
+    if not auth.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Header Authorization Bearer manquant",
+        )
+    token = auth.split(" ", 1)[1].strip()
+    claims = verify_access_token(token)
+    keycloak_id: str = claims["sub"]
+    email: str = claims.get("email", "")
+
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Le token Keycloak ne contient pas d'email",
+        )
+
+    # 1. user déjà créé ? (idempotence)
+    result = await db.execute(
+        select(User).where(User.keycloak_user_id == keycloak_id)
+    )
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        # Conflit potentiel : un user avec ce même email existe (legacy)
+        res_email = await db.execute(select(User).where(User.email == email))
+        legacy = res_email.scalar_one_or_none()
+        if legacy is not None and legacy.keycloak_user_id is None:
+            # Lien automatique : on annote l'utilisateur legacy avec son sub Keycloak
+            legacy.keycloak_user_id = keycloak_id
+            user = legacy
+        else:
+            user = User(
+                email=email,
+                keycloak_user_id=keycloak_id,
+                role=DBUserRole(payload.role),
+                mfa_enabled=False,
+                registration_status=(
+                    RegistrationStatus.pending_approval
+                    if payload.role == "psychiatre"
+                    else RegistrationStatus.approved
+                ),
+            )
+            db.add(user)
+            await db.flush()
+
+    # 2. Création du profil métier si absent
+    if user.role == DBUserRole.patient:
+        res = await db.execute(select(Patient).where(Patient.user_id == user.id))
+        if res.scalar_one_or_none() is None:
+            patient = Patient(
+                user_id=user.id,
+                first_name=payload.first_name,
+                last_name=payload.last_name,
+                date_of_birth=payload.date_of_birth,
+                gender=payload.gender,
+            )
+            db.add(patient)
+    elif user.role == DBUserRole.psychiatre:
+        res = await db.execute(
+            select(DoctorProfile).where(DoctorProfile.user_id == user.id)
+        )
+        if res.scalar_one_or_none() is None:
+            doctor = DoctorProfile(
+                user_id=user.id,
+                first_name=payload.first_name,
+                last_name=payload.last_name,
+                rpps_number_encrypted=payload.rpps_number or "",
+                license_number_encrypted=payload.license_number or "",
+                speciality=payload.speciality or "",
+                approval_status=RegistrationStatus.pending_approval,
+            )
+            db.add(doctor)
+
+    await log_action(
+        db,
+        user_id=str(user.id),
+        action="register_profile",
+        resource="user",
+        resource_id=str(user.id),
+        details={
+            "role": payload.role,
+            "keycloak_id": keycloak_id,
+            "email": email,
+        },
+    )
+    await db.commit()
+
+    first_name, last_name = await _resolve_name(user, db)
+    return UserResponse(
+        id=str(user.id),
+        keycloak_id=keycloak_id,
+        email=user.email,
+        role=user.role.value,
+        first_name=first_name,
+        last_name=last_name,
+        mfa_enabled=user.mfa_enabled,
+        registration_status=(
+            user.registration_status.value
+            if user.registration_status is not None
+            else "approved"
+        ),
+        created_at=user.created_at.isoformat() if user.created_at else "",
+    )
+
+
+@app.post("/auth/sync", response_model=UserResponse)
+async def sync_profile(
+    payload: SyncRequest,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Synchronise email/nom local si modifié côté Keycloak."""
+    user_id = current_user_uuid(current_user)
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Utilisateur introuvable"
+        )
+
+    claims = current_user["claims"]
+    claims_email: str = claims.get("email", "")
+    if claims_email and claims_email != user.email:
+        user.email = claims_email
+
+    if payload.first_name or payload.last_name:
+        if user.role == DBUserRole.patient:
+            res = await db.execute(select(Patient).where(Patient.user_id == user.id))
+            patient = res.scalar_one_or_none()
+            if patient:
+                if payload.first_name:
+                    patient.first_name = payload.first_name
+                if payload.last_name:
+                    patient.last_name = payload.last_name
+        elif user.role in (DBUserRole.psychiatre, DBUserRole.admin):
+            res = await db.execute(
+                select(DoctorProfile).where(DoctorProfile.user_id == user.id)
+            )
+            doctor = res.scalar_one_or_none()
+            if doctor:
+                if payload.first_name:
+                    doctor.first_name = payload.first_name
+                if payload.last_name:
+                    doctor.last_name = payload.last_name
+
+    await log_action(
+        db,
+        user_id=str(user.id),
+        action="sync_profile",
+        resource="user",
+        resource_id=str(user.id),
+        details={"email": user.email},
+    )
+    await db.commit()
+
+    first_name, last_name = await _resolve_name(user, db)
+    return UserResponse(
+        id=str(user.id),
+        keycloak_id=current_user["keycloak_id"],
+        email=user.email,
+        role=user.role.value,
+        first_name=first_name,
+        last_name=last_name,
+        mfa_enabled=user.mfa_enabled,
+        registration_status=(
+            user.registration_status.value
+            if user.registration_status is not None
+            else "approved"
+        ),
         created_at=user.created_at.isoformat() if user.created_at else "",
     )
 
@@ -425,7 +361,7 @@ async def get_me(
 
 @app.get("/auth/health")
 async def health():
-    return {"status": "healthy", "service": "auth"}
+    return {"status": "healthy", "service": "auth", "auth_provider": "keycloak"}
 
 
 # ---------------------------------------------------------------------------
