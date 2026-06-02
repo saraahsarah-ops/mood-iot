@@ -147,10 +147,19 @@ class User(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
-    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Keycloak user id (claim "sub"). Source de vérité pour l'identification
+    # après la migration Keycloak (feature/auth-keycloak).
+    keycloak_user_id: Mapped[Optional[str]] = mapped_column(
+        String(255), unique=True, nullable=True
+    )
+    # Legacy : conservé temporairement pour migrer les comptes existants.
+    # Sera supprimé une fois la bascule Keycloak achevée pour tous les utilisateurs.
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     role: Mapped[UserRole] = mapped_column(
         PgEnum(UserRole, name="user_role", create_type=True), nullable=False
     )
+    # MFA est désormais géré par Keycloak (TOTP). Ces colonnes restent pour
+    # compatibilité descendante et seront retirées en Phase 2.8.
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     mfa_secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

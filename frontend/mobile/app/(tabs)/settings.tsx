@@ -5,7 +5,7 @@ import { useHealthStore } from "@/stores/healthStore";
 
 export default function SettingsScreen() {
   const user = useAuthStore((s) => s.user);
-  const logout = useAuthStore((s) => s.logout);
+  const logout = useAuthStore((s) => s.signOut);
   const syncNow = useHealthStore((s) => s.syncHealthData);
   const [notifEnabled, setNotifEnabled] = useState(true);
   const [autoSync, setAutoSync] = useState(true);

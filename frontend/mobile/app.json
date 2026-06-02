@@ -35,7 +35,16 @@
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store"
-    ]
+      "expo-secure-store",
+      "expo-web-browser"
+    ],
+    "extra": {
+      "router": { "origin": false },
+      "auth": {
+        "redirectScheme": "mood-iot",
+        "discoveryEnv": "EXPO_PUBLIC_KEYCLOAK_DISCOVERY",
+        "clientIdEnv": "EXPO_PUBLIC_KEYCLOAK_CLIENT_ID"
+      }
+    }
   }
 }

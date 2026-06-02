@@ -45,6 +45,41 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── Keycloak (auth identity provider — port 8080) ──────────────────────
+  # Démarre en mode dev (HTTP, pas de TLS) avec import automatique du realm
+  # `moodiot` depuis infrastructure/keycloak/realm-moodiot.json
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: mood-iot-keycloak
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:-change-me-keycloak-admin}
+      KC_HEALTH_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_DB: "postgres"
+      KC_DB_URL: "jdbc:postgresql://postgres:5432/${POSTGRES_DB:-mood_iot}"
+      KC_DB_USERNAME: ${POSTGRES_USER:-mood_user}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-mood_secret_2026}
+      KC_DB_SCHEMA: keycloak
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./infrastructure/keycloak/realm-moodiot.json:/opt/keycloak/data/import/realm-moodiot.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - mood-iot-network
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200 OK'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
   # ── API Gateway (port 8000) ──────────────────────────────────────────────
   api-gateway:
     build:

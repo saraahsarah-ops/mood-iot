@@ -21,11 +21,21 @@ class Settings(BaseSettings):
     # ── Redis ──────────────────────────────────────────────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
 
-    # ── JWT ─────────────────────────────────────────────────────────────────
+    # ── Keycloak (source de vérité identité) ───────────────────────────────
+    # Issuer = URL publique du realm. Le JWKS est dérivé depuis cette base.
+    KEYCLOAK_ISSUER: str = ""  # e.g. https://auth.moodiot.fr/realms/moodiot
+    KEYCLOAK_JWKS_URI: str = ""  # e.g. ${ISSUER}/protocol/openid-connect/certs
+    KEYCLOAK_TOKEN_ENDPOINT: str = ""  # ${ISSUER}/protocol/openid-connect/token
+    KEYCLOAK_AUDIENCE: str = "mobile-app,dashboard-medecin,backend-services"
+    # Service-account client utilisé par le backend pour l'Admin API (optionnel)
+    KEYCLOAK_ADMIN_CLIENT_ID: str = ""
+    KEYCLOAK_ADMIN_CLIENT_SECRET: str = ""
+
+    # ── JWT legacy (conservé seulement pour signer les tokens internes
+    #    inter-services courts. NE PAS l'utiliser pour authentifier les
+    #    clients : Keycloak est la source de vérité). ─────────────────────────
     JWT_SECRET_KEY: str = "change-me-in-production"
     JWT_ALGORITHM: str = "HS256"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
-    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # ── AWS ─────────────────────────────────────────────────────────────────
     AWS_REGION: str = "eu-west-3"

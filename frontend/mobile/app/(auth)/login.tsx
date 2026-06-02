@@ -1,82 +1,70 @@
-import { useState } from "react";
+/**
+ * Écran de connexion — délègue entièrement à Keycloak.
+ *
+ * Un seul bouton ouvre la hosted UI de Keycloak (FR), qui propose :
+ *  - Email / mot de passe
+ *  - Google Sign-In
+ *  - Apple Sign-In (sur iOS)
+ *  - TOTP MFA si activé sur le compte
+ *  - Lien "Mot de passe oublié" → reset email envoyé par Keycloak
+ *
+ * Une fois le flow OIDC terminé, authStore stocke les tokens. Le _layout
+ * racine décide de rediriger vers /(tabs)/ ou /(auth)/welcome.tsx si le
+ * profil interne n'existe pas encore.
+ */
+
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { useAuthStore } from "@/stores/authStore";
 
 export default function LoginScreen() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const login = useAuthStore((s) => s.login);
-
-  async function handleLogin() {
-    if (!email.trim() || !password.trim()) {
-      setError("Veuillez remplir tous les champs.");
-      return;
-    }
-    setLoading(true);
-    setError("");
-    try {
-      await login(email.trim(), password);
-    } catch (e: any) {
-      setError(e.message || "Erreur de connexion.");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const signingIn = useAuthStore((s) => s.signingIn);
+  const error = useAuthStore((s) => s.error);
+  const signIn = useAuthStore((s) => s.signIn);
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-    >
+    <View style={styles.container}>
       <View style={styles.card}>
-        <Text style={styles.logo}>💙</Text>
+        <Text style={styles.logo} accessibilityLabel="Logo Mood-IoT">
+          💙
+        </Text>
         <Text style={styles.title}>Mood-IoT</Text>
-        <Text style={styles.subtitle}>Suivi de votre bien-etre</Text>
+        <Text style={styles.subtitle}>Suivi de votre bien-être</Text>
 
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-
-        <TextInput
-          style={styles.input}
-          placeholder="Email"
-          placeholderTextColor="#999"
-          keyboardType="email-address"
-          autoCapitalize="none"
-          value={email}
-          onChangeText={setEmail}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Mot de passe"
-          placeholderTextColor="#999"
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-        />
+        {error ? (
+          <Text style={styles.error} accessibilityRole="alert">
+            {error}
+          </Text>
+        ) : null}
 
         <TouchableOpacity
-          style={[styles.button, loading && styles.buttonDisabled]}
-          onPress={handleLogin}
-          disabled={loading}
+          style={[styles.button, signingIn && styles.buttonDisabled]}
+          onPress={() => {
+            void signIn();
+          }}
+          disabled={signingIn}
+          accessibilityRole="button"
+          accessibilityLabel="Se connecter à Mood-IoT"
+          accessibilityHint="Ouvre la page de connexion Mood-IoT dans votre navigateur"
         >
-          {loading ? (
+          {signingIn ? (
             <ActivityIndicator color="#fff" />
           ) : (
             <Text style={styles.buttonText}>Se connecter</Text>
           )}
         </TouchableOpacity>
+
+        <Text style={styles.footnote}>
+          Connexion sécurisée par OpenID Connect.{"\n"}
+          Email, Google ou Apple — au choix.
+        </Text>
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -110,17 +98,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     textAlign: "center",
   },
-  input: {
-    width: "100%",
-    height: 48,
-    borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    fontSize: 15,
-    marginBottom: 12,
-    backgroundColor: "#fafafa",
-  },
   button: {
     width: "100%",
     height: 48,
@@ -132,4 +109,11 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  footnote: {
+    marginTop: 20,
+    fontSize: 12,
+    color: "#888",
+    textAlign: "center",
+    lineHeight: 18,
+  },
 });

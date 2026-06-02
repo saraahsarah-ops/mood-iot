@@ -1,0 +1,154 @@
+{
+  "realm": "moodiot",
+  "displayName": "Mood-IoT",
+  "displayNameHtml": "<strong>Mood-IoT</strong>",
+  "enabled": true,
+  "defaultLocale": "fr",
+  "supportedLocales": ["fr"],
+  "internationalizationEnabled": true,
+  "loginTheme": "keycloak",
+  "emailTheme": "keycloak",
+  "sslRequired": "external",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "rememberMe": true,
+  "verifyEmail": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "failureFactor": 5,
+  "accessTokenLifespan": 300,
+  "accessTokenLifespanForImplicitFlow": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "offlineSessionIdleTimeout": 2592000,
+  "passwordPolicy": "length(10) and notUsername and notEmail and digits(1) and lowerCase(1) and upperCase(1) and specialChars(1)",
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyDigits": 6,
+  "otpPolicyLookAheadWindow": 1,
+  "otpPolicyPeriod": 30,
+  "roles": {
+    "realm": [
+      { "name": "patient", "description": "Utilisateur patient de l'app mobile" },
+      { "name": "psychiatre", "description": "Médecin psychiatre du dashboard" },
+      { "name": "admin", "description": "Administrateur de l'institution" }
+    ]
+  },
+  "defaultRole": {
+    "name": "patient",
+    "description": "Rôle par défaut attribué à la création d'un compte"
+  },
+  "requiredActions": [
+    {
+      "alias": "CONFIGURE_TOTP",
+      "name": "Configurer OTP",
+      "providerId": "CONFIGURE_TOTP",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 10
+    },
+    {
+      "alias": "VERIFY_EMAIL",
+      "name": "Vérifier l'email",
+      "providerId": "VERIFY_EMAIL",
+      "enabled": true,
+      "defaultAction": true,
+      "priority": 50
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "mobile-app",
+      "name": "Mood-IoT Mobile (Patient)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "mood-iot://callback",
+        "exp://*"
+      ],
+      "webOrigins": ["+"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+"
+      },
+      "fullScopeAllowed": true,
+      "defaultClientScopes": [
+        "web-origins",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "optionalClientScopes": ["offline_access"]
+    },
+    {
+      "clientId": "dashboard-medecin",
+      "name": "Mood-IoT Dashboard Médecin (Web)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "http://localhost:3000/api/auth/callback/keycloak",
+        "https://dashboard.moodiot.fr/api/auth/callback/keycloak"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "https://dashboard.moodiot.fr"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "fullScopeAllowed": true,
+      "defaultClientScopes": [
+        "web-origins",
+        "profile",
+        "roles",
+        "email"
+      ]
+    },
+    {
+      "clientId": "backend-services",
+      "name": "Mood-IoT Backend (Service Account)",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": false,
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "secret": "change-me-keycloak-admin-secret",
+      "attributes": {}
+    }
+  ],
+  "components": {
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "providerId": "declarative-user-profile",
+        "config": {
+          "kc.user.profile.config": [
+            "{\"attributes\":[{\"name\":\"email\",\"displayName\":\"${email}\",\"required\":{\"roles\":[\"user\"]}}]}"
+          ]
+        }
+      }
+    ]
+  },
+  "smtpServer": {
+    "host": "smtp.resend.com",
+    "port": "587",
+    "starttls": "true",
+    "auth": "true",
+    "from": "noreply@mood-iot.fr",
+    "fromDisplayName": "Mood-IoT",
+    "replyTo": "noreply@mood-iot.fr",
+    "user": "resend",
+    "password": "${env.RESEND_API_KEY}"
+  }
+}
