@@ -18,10 +18,13 @@ services:
       - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./backend/infrastructure/database/00-keycloak-schema.sql:/docker-entrypoint-initdb.d/00-keycloak-schema.sql
       - ./backend/infrastructure/database/01-extensions.sql:/docker-entrypoint-initdb.d/01-extensions.sql
       - ./backend/infrastructure/database/02-schema.sql:/docker-entrypoint-initdb.d/02-schema.sql
       - ./backend/infrastructure/database/03-indexes.sql:/docker-entrypoint-initdb.d/03-indexes.sql
       - ./backend/infrastructure/database/04-seed.sql:/docker-entrypoint-initdb.d/04-seed.sql
+      - ./backend/infrastructure/database/05-doctor-institution-migration.sql:/docker-entrypoint-initdb.d/05-doctor-institution-migration.sql
+      - ./backend/infrastructure/database/06-keycloak-migration.sql:/docker-entrypoint-initdb.d/06-keycloak-migration.sql
     networks:
       - mood-iot-network
     healthcheck:
