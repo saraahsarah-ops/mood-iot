@@ -1,10 +1,24 @@
-/* Client API — communique avec le backend FastAPI */
+/* Client API — communique avec le backend FastAPI.
+ *
+ * Le token d'accès est récupéré depuis la session NextAuth (cookie HttpOnly)
+ * via `getSession()`. Pas de localStorage : la session est gérée côté serveur
+ * et NextAuth se charge du refresh transparent quand l'access_token expire.
+ */
+
+import { getSession } from "next-auth/react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8010/api/v1";
 
 async function fetcher<T>(path: string, options?: RequestInit): Promise<T> {
-  const token =
-    typeof window !== "undefined" ? localStorage.getItem("mood_token") : null;
+  // getSession() est sûr aussi bien côté client que pendant un SSR limité.
+  // Si on n'a pas de session (ex. pages publiques), on appelle sans token.
+  let token: string | null = null;
+  try {
+    const session = await getSession();
+    token = session?.accessToken ?? null;
+  } catch {
+    token = null;
+  }
   const res = await fetch(`${API_URL}${path}`, {
     cache: "no-store",
     ...options,
@@ -26,11 +40,39 @@ async function fetcher<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 /* ── Auth ─────────────────────────────────────────────── */
-export async function login(email: string, password: string) {
-  return fetcher<{ access_token: string; user: { id: string; role: string } }>(
-    "/auth/login",
-    { method: "POST", body: JSON.stringify({ email, password }) },
+
+/**
+ * Inscription d'un médecin : appelée APRÈS le login Keycloak depuis la
+ * page /register/doctor/complete. Crée la ligne `users` + `doctor_profile`
+ * avec statut "pending_approval" (un admin doit ensuite valider).
+ */
+export async function registerDoctorProfile(payload: {
+  first_name: string;
+  last_name: string;
+  rpps_number: string;
+  license_number: string;
+  speciality: string;
+}) {
+  return fetcher<{ id: string; role: string; registration_status: string }>(
+    "/auth/register-profile",
+    {
+      method: "POST",
+      body: JSON.stringify({ role: "psychiatre", ...payload }),
+    },
   );
+}
+
+/** Profil interne du médecin connecté. */
+export async function getMyProfile() {
+  return fetcher<{
+    id: string;
+    keycloak_id: string;
+    email: string;
+    role: string;
+    first_name: string;
+    last_name: string;
+    registration_status: string;
+  }>("/auth/me");
 }
 
 /* ── Patients ─────────────────────────────────────────── */

@@ -1,7 +1,8 @@
 "use client";
 import "./globals.css";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { SessionProvider } from "next-auth/react";
 import Sidebar from "@/components/Sidebar";
 import { useAuthStore } from "@/lib/auth";
 import { useNotifStore } from "@/lib/store";
@@ -10,24 +11,45 @@ import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.min.css";
 import CookieConsent from "@/components/CookieConsent";
 
+const PUBLIC_ROUTES = ["/login", "/register/doctor", "/privacy", "/about"];
+
+/**
+ * Layout racine. `<html>` et `<body>` doivent être ici (App Router).
+ * `<SessionProvider>` est posé à l'intérieur de `<body>` pour exposer la
+ * session NextAuth à tous les composants client.
+ */
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="fr">
+      <body>
+        <SessionProvider>
+          <ToastContainer position="top-right" autoClose={3000} hideProgressBar newestOnTop theme="light" />
+          <CookieConsent />
+          <RouteGate>{children}</RouteGate>
+        </SessionProvider>
+      </body>
+    </html>
+  );
+}
+
+/**
+ * Decide entre :
+ *  - page publique : juste rendre les children
+ *  - page privee + non auth : redirige vers /login
+ *  - page privee + auth : sidebar + main
+ *  - en cours de chargement : spinner
+ */
+function RouteGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { isAuthenticated, restore, user } = useAuthStore();
-  const [ready, setReady] = useState(false);
+  const { isAuthenticated, loading } = useAuthStore();
   const setStoreItems = useNotifStore((s) => s.setItems);
 
-  const PUBLIC_ROUTES = ["/login", "/register/doctor", "/privacy", "/about"];
   const isPublicPage = PUBLIC_ROUTES.some(
     (route) => pathname === route || pathname.startsWith(route + "/"),
   );
 
-  useEffect(() => {
-    restore();
-    setReady(true);
-  }, []);
-
-  /* Charger les notifications pour le badge sidebar */
+  // Charge les notifications pour le badge sidebar quand connecte
   useEffect(() => {
     if (!isAuthenticated) return;
     getAllNotifications(50)
@@ -37,53 +59,37 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         }
       })
       .catch(() => {});
-  }, [isAuthenticated]);
+  }, [isAuthenticated, setStoreItems]);
 
+  // Redirige vers /login si page privee et non connecte
   useEffect(() => {
-    if (!ready) return;
+    if (loading) return;
     if (!isAuthenticated && !isPublicPage) {
       router.push("/login");
     }
-  }, [ready, isAuthenticated, isPublicPage, router]);
+  }, [loading, isAuthenticated, isPublicPage, router]);
 
-  // Public pages — no sidebar
   if (isPublicPage) {
+    return <div className="min-h-screen bg-[#f4f6fb]">{children}</div>;
+  }
+
+  if (loading || !isAuthenticated) {
     return (
-      <html lang="fr">
-        <body>
-          <ToastContainer position="top-right" autoClose={3000} hideProgressBar newestOnTop theme="light" />
-          <CookieConsent />
-          {children}
-        </body>
-      </html>
+      <div className="flex min-h-screen items-center justify-center bg-[#f4f6fb]">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" />
+          <p className="text-[13px] text-gray-400">Chargement...</p>
+        </div>
+      </div>
     );
   }
 
-  // Not ready or not authenticated — loading
-  if (!ready || !isAuthenticated) {
-    return (
-      <html lang="fr">
-        <body className="flex min-h-screen items-center justify-center bg-[#f4f6fb]">
-          <ToastContainer position="top-right" autoClose={3000} hideProgressBar newestOnTop theme="light" />
-          <CookieConsent />
-          <div className="flex flex-col items-center gap-3">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" />
-            <p className="text-[13px] text-gray-400">Chargement...</p>
-          </div>
-        </body>
-      </html>
-    );
-  }
-
-  // Authenticated — full layout
   return (
-    <html lang="fr">
-      <body className="flex min-h-screen bg-[#f4f6fb]">
-        <ToastContainer position="top-right" autoClose={3000} hideProgressBar newestOnTop theme="light" />
-        <CookieConsent />
-        <Sidebar />
-        <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-5 py-5">{children}</main>
-      </body>
-    </html>
+    <div className="flex min-h-screen bg-[#f4f6fb]">
+      <Sidebar />
+      <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-5 py-5">
+        {children}
+      </main>
+    </div>
   );
 }

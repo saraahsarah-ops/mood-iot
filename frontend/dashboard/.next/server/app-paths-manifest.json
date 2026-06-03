@@ -1,9 +1,0 @@
-{
-  "/login/page": "app/login/page.js",
-  "/profile/page": "app/profile/page.js",
-  "/page": "app/page.js",
-  "/privacy/page": "app/privacy/page.js",
-  "/register/doctor/page": "app/register/doctor/page.js",
-  "/teleconsult/page": "app/teleconsult/page.js",
-  "/messagerie/page": "app/messagerie/page.js"
-}

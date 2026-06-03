@@ -80,18 +80,34 @@ def verify_access_token(token: str) -> dict[str, Any]:
     audiences = [
         a.strip() for a in settings.KEYCLOAK_AUDIENCE.split(",") if a.strip()
     ]
+    # On accepte plusieurs issuers separes par des virgules. En dev local
+    # Keycloak emet une URL differente selon le Host header
+    # (localhost / 10.0.2.2 / keycloak), donc on tolere la liste configuree.
+    allowed_issuers = [
+        i.strip() for i in (settings.KEYCLOAK_ISSUER or "").split(",") if i.strip()
+    ]
     try:
         claims = jwt.decode(
             token,
             signing_key,
             algorithms=["RS256"],
-            issuer=settings.KEYCLOAK_ISSUER or None,
+            # On valide la signature et l'audience automatiquement,
+            # mais on verifie l'issuer manuellement (pyjwt n'accepte qu'une
+            # seule valeur, alors qu'on en a plusieurs en local).
             audience=audiences if audiences else None,
             options={
                 "require": ["exp", "iss", "sub"],
                 "verify_aud": bool(audiences),
+                "verify_iss": False,
             },
         )
+        if allowed_issuers:
+            token_iss = claims.get("iss")
+            if token_iss not in allowed_issuers:
+                raise InvalidTokenError(
+                    f"Issuer '{token_iss}' n'est pas dans la liste autorisee "
+                    f"{allowed_issuers}"
+                )
     except InvalidTokenError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

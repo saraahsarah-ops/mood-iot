@@ -82,6 +82,7 @@
       },
       "fullScopeAllowed": true,
       "defaultClientScopes": [
+        "basic",
         "web-origins",
         "profile",
         "roles",
@@ -93,7 +94,8 @@
       "clientId": "dashboard-medecin",
       "name": "Mood-IoT Dashboard Médecin (Web)",
       "enabled": true,
-      "publicClient": true,
+      "publicClient": false,
+      "secret": "REPLACE_ME_FROM_ENV_KEYCLOAK_DASHBOARD_SECRET",
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
       "redirectUris": [
@@ -109,6 +111,7 @@
       },
       "fullScopeAllowed": true,
       "defaultClientScopes": [
+        "basic",
         "web-origins",
         "profile",
         "roles",
