@@ -128,18 +128,6 @@
       "attributes": {}
     }
   ],
-  "components": {
-    "org.keycloak.userprofile.UserProfileProvider": [
-      {
-        "providerId": "declarative-user-profile",
-        "config": {
-          "kc.user.profile.config": [
-            "{\"attributes\":[{\"name\":\"email\",\"displayName\":\"${email}\",\"required\":{\"roles\":[\"user\"]}}]}"
-          ]
-        }
-      }
-    ]
-  },
   "smtpServer": {
     "host": "smtp.resend.com",
     "port": "587",

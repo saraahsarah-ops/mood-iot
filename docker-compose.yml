@@ -129,8 +129,13 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-LTDNcEcwfj3wHgE7UFOVjF3kK1p7qV669cOyoF8rf-Y=}
-      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-60}
-      - JWT_REFRESH_TOKEN_EXPIRE_DAYS=${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      # ── Keycloak (vérification des access tokens RS256) ─────────────────
+      - KEYCLOAK_ISSUER=${KEYCLOAK_ISSUER:-http://keycloak:8080/realms/moodiot}
+      - KEYCLOAK_JWKS_URI=${KEYCLOAK_JWKS_URI:-http://keycloak:8080/realms/moodiot/protocol/openid-connect/certs}
+      - KEYCLOAK_TOKEN_ENDPOINT=${KEYCLOAK_TOKEN_ENDPOINT:-http://keycloak:8080/realms/moodiot/protocol/openid-connect/token}
+      - KEYCLOAK_AUDIENCE=${KEYCLOAK_AUDIENCE:-mobile-app,dashboard-medecin,backend-services}
+      - KEYCLOAK_ADMIN_CLIENT_ID=${KEYCLOAK_ADMIN_CLIENT_ID:-backend-services}
+      - KEYCLOAK_ADMIN_CLIENT_SECRET=${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -156,6 +161,16 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql://mood_user:mood_secret_2026@postgres:5432/mood_iot}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
+      # En local Keycloak emet iss=http://localhost:8080 quand on l'appelle
+      # depuis l'hote, et iss=http://keycloak:8080 quand on l'appelle depuis
+      # un autre conteneur. On accepte les deux via la verification souple
+      # cote backend (cf. src/shared/keycloak.py).
+      - KEYCLOAK_ISSUER=${KEYCLOAK_ISSUER:-http://localhost:8080/realms/moodiot}
+      - KEYCLOAK_JWKS_URI=${KEYCLOAK_JWKS_URI:-http://keycloak:8080/realms/moodiot/protocol/openid-connect/certs}
+      # 'account' = audience par defaut de Keycloak. Ajouter 'mobile-app',
+      # 'dashboard-medecin', 'backend-services' si on configure un audience
+      # mapper plus tard.
+      - KEYCLOAK_AUDIENCE=${KEYCLOAK_AUDIENCE:-account,mobile-app,dashboard-medecin,backend-services}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-LTDNcEcwfj3wHgE7UFOVjF3kK1p7qV669cOyoF8rf-Y=}
     depends_on:
       postgres:
@@ -180,6 +195,16 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql://mood_user:mood_secret_2026@postgres:5432/mood_iot}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
+      # En local Keycloak emet iss=http://localhost:8080 quand on l'appelle
+      # depuis l'hote, et iss=http://keycloak:8080 quand on l'appelle depuis
+      # un autre conteneur. On accepte les deux via la verification souple
+      # cote backend (cf. src/shared/keycloak.py).
+      - KEYCLOAK_ISSUER=${KEYCLOAK_ISSUER:-http://localhost:8080/realms/moodiot}
+      - KEYCLOAK_JWKS_URI=${KEYCLOAK_JWKS_URI:-http://keycloak:8080/realms/moodiot/protocol/openid-connect/certs}
+      # 'account' = audience par defaut de Keycloak. Ajouter 'mobile-app',
+      # 'dashboard-medecin', 'backend-services' si on configure un audience
+      # mapper plus tard.
+      - KEYCLOAK_AUDIENCE=${KEYCLOAK_AUDIENCE:-account,mobile-app,dashboard-medecin,backend-services}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-LTDNcEcwfj3wHgE7UFOVjF3kK1p7qV669cOyoF8rf-Y=}
       - SCORING_THRESHOLDS=${SCORING_THRESHOLDS:-40/60/80}
       - MODEL_S3_BUCKET=${MODEL_S3_BUCKET:-mood-iot-models}
@@ -210,6 +235,16 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql://mood_user:mood_secret_2026@postgres:5432/mood_iot}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
+      # En local Keycloak emet iss=http://localhost:8080 quand on l'appelle
+      # depuis l'hote, et iss=http://keycloak:8080 quand on l'appelle depuis
+      # un autre conteneur. On accepte les deux via la verification souple
+      # cote backend (cf. src/shared/keycloak.py).
+      - KEYCLOAK_ISSUER=${KEYCLOAK_ISSUER:-http://localhost:8080/realms/moodiot}
+      - KEYCLOAK_JWKS_URI=${KEYCLOAK_JWKS_URI:-http://keycloak:8080/realms/moodiot/protocol/openid-connect/certs}
+      # 'account' = audience par defaut de Keycloak. Ajouter 'mobile-app',
+      # 'dashboard-medecin', 'backend-services' si on configure un audience
+      # mapper plus tard.
+      - KEYCLOAK_AUDIENCE=${KEYCLOAK_AUDIENCE:-account,mobile-app,dashboard-medecin,backend-services}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-LTDNcEcwfj3wHgE7UFOVjF3kK1p7qV669cOyoF8rf-Y=}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
@@ -240,6 +275,16 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql://mood_user:mood_secret_2026@postgres:5432/mood_iot}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
+      # En local Keycloak emet iss=http://localhost:8080 quand on l'appelle
+      # depuis l'hote, et iss=http://keycloak:8080 quand on l'appelle depuis
+      # un autre conteneur. On accepte les deux via la verification souple
+      # cote backend (cf. src/shared/keycloak.py).
+      - KEYCLOAK_ISSUER=${KEYCLOAK_ISSUER:-http://localhost:8080/realms/moodiot}
+      - KEYCLOAK_JWKS_URI=${KEYCLOAK_JWKS_URI:-http://keycloak:8080/realms/moodiot/protocol/openid-connect/certs}
+      # 'account' = audience par defaut de Keycloak. Ajouter 'mobile-app',
+      # 'dashboard-medecin', 'backend-services' si on configure un audience
+      # mapper plus tard.
+      - KEYCLOAK_AUDIENCE=${KEYCLOAK_AUDIENCE:-account,mobile-app,dashboard-medecin,backend-services}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-LTDNcEcwfj3wHgE7UFOVjF3kK1p7qV669cOyoF8rf-Y=}
       - JITSI_SERVER_URL=${JITSI_SERVER_URL:-https://meet.jit.si}
       - JITSI_JWT_SECRET=${JITSI_JWT_SECRET:-change-me}
@@ -266,6 +311,16 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql://mood_user:mood_secret_2026@postgres:5432/mood_iot}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
+      # En local Keycloak emet iss=http://localhost:8080 quand on l'appelle
+      # depuis l'hote, et iss=http://keycloak:8080 quand on l'appelle depuis
+      # un autre conteneur. On accepte les deux via la verification souple
+      # cote backend (cf. src/shared/keycloak.py).
+      - KEYCLOAK_ISSUER=${KEYCLOAK_ISSUER:-http://localhost:8080/realms/moodiot}
+      - KEYCLOAK_JWKS_URI=${KEYCLOAK_JWKS_URI:-http://keycloak:8080/realms/moodiot/protocol/openid-connect/certs}
+      # 'account' = audience par defaut de Keycloak. Ajouter 'mobile-app',
+      # 'dashboard-medecin', 'backend-services' si on configure un audience
+      # mapper plus tard.
+      - KEYCLOAK_AUDIENCE=${KEYCLOAK_AUDIENCE:-account,mobile-app,dashboard-medecin,backend-services}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-LTDNcEcwfj3wHgE7UFOVjF3kK1p7qV669cOyoF8rf-Y=}
     depends_on:
       postgres:
