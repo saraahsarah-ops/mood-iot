@@ -173,9 +173,13 @@ export default function Sidebar() {
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-[13px] font-semibold text-slate-200">
-                {user?.first_name ? `Dr. ${user.last_name || user.first_name}` : "Dr. Martin"}
+                {user?.first_name || user?.last_name
+                  ? `Dr. ${[user.first_name, user.last_name].filter(Boolean).join(" ")}`
+                  : "Dr. ··"}
               </p>
-              <p className="text-[11px] text-slate-500">{user?.role || "Psychiatre"}</p>
+              <p className="truncate text-[11px] text-slate-500">
+                {user?.email || user?.role || "Psychiatre"}
+              </p>
             </div>
           </Link>
           <button

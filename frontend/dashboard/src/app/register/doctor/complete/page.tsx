@@ -31,15 +31,38 @@ export default function CompleteDoctorProfilePage() {
 
   if (authLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" />
+      <div className="flex min-h-screen items-center justify-center bg-[#f4f6fb]">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#0288d1] border-t-transparent" />
+          <p className="text-[13px] text-gray-500">Vérification de la session…</p>
+        </div>
       </div>
     );
   }
 
   if (!isAuthenticated) {
-    // Pas connecte -> retour login (le layout gere la redirection)
-    return null;
+    // Pas connecte -> le layout va rediriger vers /login, mais en attendant
+    // on affiche un message clair plutot qu'une page blanche.
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#f4f6fb] px-4">
+        <div className="w-full max-w-md rounded-2xl bg-white p-10 text-center shadow">
+          <div className="text-4xl mb-3">🔒</div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-2">
+            Session requise
+          </h2>
+          <p className="text-sm text-gray-600 mb-6">
+            Vous devez d&apos;abord créer un compte ou vous connecter pour
+            finaliser votre inscription.
+          </p>
+          <a
+            href="/register/doctor"
+            className="inline-flex items-center justify-center rounded-lg bg-[#0288d1] px-4 py-2 text-sm font-semibold text-white hover:bg-[#0277bd]"
+          >
+            Créer mon compte
+          </a>
+        </div>
+      </div>
+    );
   }
 
   const isValid =

@@ -11,7 +11,12 @@ import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.min.css";
 import CookieConsent from "@/components/CookieConsent";
 
-const PUBLIC_ROUTES = ["/login", "/register/doctor", "/privacy", "/about"];
+// Routes accessibles sans authentification.
+// `/register/doctor` est public (entree de l'inscription), mais
+// `/register/doctor/complete` exige une session Keycloak active : la matche
+// exacte ci-dessous evite que startsWith() considere /complete comme public.
+const PUBLIC_ROUTES_EXACT = ["/login", "/register/doctor"];
+const PUBLIC_ROUTES_PREFIX = ["/privacy", "/about"];
 
 /**
  * Layout racine. `<html>` et `<body>` doivent être ici (App Router).
@@ -42,24 +47,29 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 function RouteGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { isAuthenticated, loading } = useAuthStore();
+  const { isAuthenticated, user, loading } = useAuthStore();
   const setStoreItems = useNotifStore((s) => s.setItems);
 
-  const isPublicPage = PUBLIC_ROUTES.some(
-    (route) => pathname === route || pathname.startsWith(route + "/"),
-  );
+  const isPublicPage =
+    PUBLIC_ROUTES_EXACT.includes(pathname) ||
+    PUBLIC_ROUTES_PREFIX.some(
+      (route) => pathname === route || pathname.startsWith(route + "/"),
+    );
 
   // Charge les notifications pour le badge sidebar quand connecte
+  // ET seulement quand l'utilisateur a deja un profil cote backend
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || !user) return;
     getAllNotifications(50)
       .then((res) => {
         if (res.notifications) {
           setStoreItems(res.notifications);
         }
       })
-      .catch(() => {});
-  }, [isAuthenticated, setStoreItems]);
+      .catch(() => {
+        // 404 = pas encore de profil, l'utilisateur doit completer son inscription
+      });
+  }, [isAuthenticated, user, setStoreItems]);
 
   // Redirige vers /login si page privee et non connecte
   useEffect(() => {
