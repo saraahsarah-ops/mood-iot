@@ -4,11 +4,9 @@
     "slug": "mood-iot-patient",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "scheme": "mood-iot",
     "splash": {
-      "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#0288d1"
     },
@@ -22,7 +20,6 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0288d1"
       },
       "package": "com.moodiot.patient",
@@ -35,8 +32,7 @@
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store",
-      "expo-web-browser"
+      "expo-secure-store"
     ],
     "extra": {
       "router": { "origin": false },

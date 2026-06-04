@@ -136,9 +136,10 @@
     "port": "587",
     "starttls": "true",
     "auth": "true",
-    "from": "noreply@mood-iot.fr",
+    "from": "info@mood-iot.fr",
     "fromDisplayName": "Mood-IoT",
-    "replyTo": "noreply@mood-iot.fr",
+    "replyTo": "info@mood-iot.fr",
+    "replyToDisplayName": "Mood-IoT",
     "user": "resend",
     "password": "${env.RESEND_API_KEY}"
   }
