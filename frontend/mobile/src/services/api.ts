@@ -167,6 +167,55 @@ export async function submitPhq9(
   });
 }
 
+/* ── Messagerie médecin → patient ─────────────── */
+
+export interface MessageItem {
+  id: string;
+  sender_id: string;
+  sender_name: string;
+  sender_role: "patient" | "psychiatre" | "admin";
+  content: string;
+  sent_at: string;
+  read_at: string | null;
+}
+
+export interface MessageListResponse {
+  items: MessageItem[];
+  total: number;
+  unread_count: number;
+}
+
+export async function fetchMessages(opts?: {
+  unreadOnly?: boolean;
+  limit?: number;
+  offset?: number;
+}): Promise<MessageListResponse> {
+  const params = new URLSearchParams();
+  if (opts?.unreadOnly) params.set("unread_only", "true");
+  if (opts?.limit != null) params.set("limit", String(opts.limit));
+  if (opts?.offset != null) params.set("offset", String(opts.offset));
+  const qs = params.toString();
+  return request<MessageListResponse>(
+    `/patients/me/messages${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export async function fetchUnreadCount(): Promise<{ unread_count: number }> {
+  return request<{ unread_count: number }>(
+    "/patients/me/messages/unread-count",
+  );
+}
+
+export async function fetchMessage(messageId: string): Promise<MessageItem> {
+  return request<MessageItem>(`/patients/me/messages/${messageId}`);
+}
+
+export async function markMessageRead(messageId: string): Promise<MessageItem> {
+  return request<MessageItem>(`/patients/me/messages/${messageId}/read`, {
+    method: "PATCH",
+  });
+}
+
 /* ── Notifications ────────────────────────────── */
 
 export interface PatientNotification {

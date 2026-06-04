@@ -10,8 +10,10 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "date-fns": "^4.1.0",
     "expo": "~52.0.0",
     "expo-auth-session": "~6.0.0",
+    "expo-build-properties": "^56.0.16",
     "expo-crypto": "~14.0.0",
     "expo-router": "~4.0.0",
     "expo-secure-store": "~14.0.0",
@@ -19,16 +21,15 @@
     "expo-web-browser": "~14.0.0",
     "react": "18.3.1",
     "react-native": "0.76.0",
-    "react-native-safe-area-context": "4.14.0",
-    "react-native-screens": "~4.4.0",
     "react-native-health-connect": "^3.5.0",
     "react-native-reanimated": "~3.16.0",
-    "zustand": "^5.0.0",
-    "date-fns": "^4.1.0"
+    "react-native-safe-area-context": "4.14.0",
+    "react-native-screens": "~4.4.0",
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@babel/core": "^7.25.0",
     "@types/react": "~18.3.0",
-    "typescript": "~5.6.0",
-    "@babel/core": "^7.25.0"
+    "typescript": "~5.6.0"
   }
 }

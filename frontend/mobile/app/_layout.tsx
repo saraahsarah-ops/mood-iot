@@ -18,9 +18,9 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (loading) return;
-    const inAuth = segments[0] === "(auth)";
-    const atWelcome =
-      segments[0] === "(auth)" && segments[1] === "welcome";
+    const segs: string[] = segments as unknown as string[];
+    const inAuth = segs[0] === "(auth)";
+    const atWelcome = segs[0] === "(auth)" && segs[1] === "welcome";
 
     if (!tokens) {
       // Non connecté → écran de login

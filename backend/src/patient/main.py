@@ -33,6 +33,7 @@ from src.shared.models import (
     FeatureVector,
     RiskScore,
     Notification,
+    Message,
     User,
 )
 from src.shared.audit import log_action
@@ -1293,6 +1294,183 @@ async def rgpd_update_consent(
         granted=payload.granted,
         updated_at=now.isoformat(),
     )
+
+
+# ===========================================================================
+# Messagerie médecin → patient (côté patient)
+# ===========================================================================
+#
+# Les messages sont stockés dans la table `messages` (modèle Message), partagée
+# avec le dashboard médecin (qui les crée via teleconsult/main.py). Ici on
+# expose uniquement les endpoints *patient-facing* :
+#
+#   GET    /patients/me/messages                  → inbox du patient connecté
+#   GET    /patients/me/messages/unread-count     → badge "non lus"
+#   GET    /patients/me/messages/{message_id}     → détail d'un message
+#   PATCH  /patients/me/messages/{message_id}/read → marquer comme lu
+#
+# Sécurité : `recipient_id` est forcé à `current_user.user_id`. Aucun risque
+# qu'un patient accède à la boîte d'un autre (cf. IDOR identifiés dans
+# AUDIT_REPORT.md).
+# ---------------------------------------------------------------------------
+
+
+class MessageItem(BaseModel):
+    id: str
+    sender_id: str
+    sender_name: str
+    sender_role: str  # "psychiatre" | "patient"
+    content: str
+    sent_at: str
+    read_at: Optional[str]
+
+
+class MessageListResponse(BaseModel):
+    items: list[MessageItem]
+    total: int
+    unread_count: int
+
+
+class UnreadCountResponse(BaseModel):
+    unread_count: int
+
+
+def _serialize_message(msg: Message, sender: User) -> MessageItem:
+    """Convert SQLAlchemy Message + User → MessageItem DTO."""
+    return MessageItem(
+        id=str(msg.id),
+        sender_id=str(msg.sender_id),
+        sender_name=sender.email.split("@")[0] if sender else "",
+        sender_role=sender.role.value if sender else "psychiatre",
+        content=msg.content,
+        sent_at=msg.sent_at.isoformat() if msg.sent_at else "",
+        read_at=msg.read_at.isoformat() if msg.read_at else None,
+    )
+
+
+@app.get("/patients/me/messages", response_model=MessageListResponse)
+async def list_my_messages(
+    unread_only: bool = Query(False, description="Ne retourne que les non lus"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Inbox du patient connecté (messages reçus, du plus récent au plus ancien)."""
+    user_id = current_user["user_id"]
+
+    base_where = Message.recipient_id == user_id
+    if unread_only:
+        base_where = and_(base_where, Message.read_at.is_(None))
+
+    # Récupère les messages + senders en une seule query
+    res = await db.execute(
+        select(Message, User)
+        .join(User, Message.sender_id == User.id)
+        .where(base_where)
+        .order_by(Message.sent_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    rows = res.all()
+    items = [_serialize_message(m, s) for (m, s) in rows]
+
+    # Total + unread_count globaux
+    total_res = await db.execute(
+        select(func.count(Message.id)).where(Message.recipient_id == user_id)
+    )
+    total = int(total_res.scalar() or 0)
+
+    unread_res = await db.execute(
+        select(func.count(Message.id)).where(
+            and_(Message.recipient_id == user_id, Message.read_at.is_(None))
+        )
+    )
+    unread_count = int(unread_res.scalar() or 0)
+
+    return MessageListResponse(items=items, total=total, unread_count=unread_count)
+
+
+@app.get("/patients/me/messages/unread-count", response_model=UnreadCountResponse)
+async def my_unread_count(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Compteur de messages non lus — utilisé par le badge de l'app mobile."""
+    res = await db.execute(
+        select(func.count(Message.id)).where(
+            and_(
+                Message.recipient_id == current_user["user_id"],
+                Message.read_at.is_(None),
+            )
+        )
+    )
+    return UnreadCountResponse(unread_count=int(res.scalar() or 0))
+
+
+@app.get("/patients/me/messages/{message_id}", response_model=MessageItem)
+async def get_my_message(
+    message_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Détail d'un message reçu. 404 si le message ne s'adresse pas à l'utilisateur."""
+    res = await db.execute(
+        select(Message, User)
+        .join(User, Message.sender_id == User.id)
+        .where(
+            and_(
+                Message.id == message_id,
+                Message.recipient_id == current_user["user_id"],
+            )
+        )
+    )
+    row = res.first()
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Message introuvable",
+        )
+    msg, sender = row
+    return _serialize_message(msg, sender)
+
+
+@app.patch("/patients/me/messages/{message_id}/read", response_model=MessageItem)
+async def mark_my_message_read(
+    message_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Marque un message comme lu. Idempotent : si déjà lu, retourne tel quel."""
+    res = await db.execute(
+        select(Message, User)
+        .join(User, Message.sender_id == User.id)
+        .where(
+            and_(
+                Message.id == message_id,
+                Message.recipient_id == current_user["user_id"],
+            )
+        )
+    )
+    row = res.first()
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Message introuvable",
+        )
+    msg, sender = row
+    if msg.read_at is None:
+        msg.read_at = datetime.now(timezone.utc)
+        await log_action(
+            db,
+            user_id=current_user["user_id"],
+            action="message_read",
+            resource="message",
+            resource_id=str(msg.id),
+            details={"sender_id": str(msg.sender_id)},
+        )
+        await db.commit()
+    return _serialize_message(msg, sender)
 
 
 # ---------------------------------------------------------------------------
