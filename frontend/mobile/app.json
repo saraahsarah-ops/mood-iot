@@ -39,17 +39,24 @@
           "android": {
             "minSdkVersion": 26,
             "compileSdkVersion": 35,
-            "targetSdkVersion": 35
+            "targetSdkVersion": 35,
+            "kotlinVersion": "1.9.25"
           }
         }
-      ]
+      ],
+      "expo-asset"
     ],
     "extra": {
-      "router": { "origin": false },
+      "router": {
+        "origin": false
+      },
       "auth": {
         "redirectScheme": "mood-iot",
         "discoveryEnv": "EXPO_PUBLIC_KEYCLOAK_DISCOVERY",
         "clientIdEnv": "EXPO_PUBLIC_KEYCLOAK_CLIENT_ID"
+      },
+      "eas": {
+        "projectId": "d9cde624-ef7d-4ed0-bd7a-da86a6b8cb2c"
       }
     }
   }

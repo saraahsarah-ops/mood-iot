@@ -36,3 +36,14 @@ async def get_db() -> AsyncSession:
         except Exception:
             await session.rollback()
             raise
+
+
+async def get_db_session() -> AsyncSession:
+    """Variante callable hors-FastAPI (scheduler, scripts). Même contrat."""
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise

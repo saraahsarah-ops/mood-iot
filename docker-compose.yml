@@ -25,6 +25,7 @@ services:
       - ./backend/infrastructure/database/04-seed.sql:/docker-entrypoint-initdb.d/04-seed.sql
       - ./backend/infrastructure/database/05-doctor-institution-migration.sql:/docker-entrypoint-initdb.d/05-doctor-institution-migration.sql
       - ./backend/infrastructure/database/06-keycloak-migration.sql:/docker-entrypoint-initdb.d/06-keycloak-migration.sql
+      - ./backend/infrastructure/database/07-notification-rdv.sql:/docker-entrypoint-initdb.d/07-notification-rdv.sql
     networks:
       - mood-iot-network
     healthcheck:
@@ -249,7 +250,12 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
       - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
+      - TWILIO_FROM_PHONE=${TWILIO_FROM_PHONE:-}
       - FCM_CREDENTIALS_JSON=${FCM_CREDENTIALS_JSON:-{}}
+      # Resend SMTP/API pour les emails transactionnels (rappels RDV inclus)
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - SES_FROM_EMAIL=${SES_FROM_EMAIL:-noreply@mood-iot.fr}
+      - JITSI_SERVER_URL=${JITSI_SERVER_URL:-https://meet.jit.si}
     depends_on:
       postgres:
         condition: service_healthy

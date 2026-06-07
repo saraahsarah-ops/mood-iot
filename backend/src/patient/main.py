@@ -33,7 +33,9 @@ from src.shared.models import (
     FeatureVector,
     RiskScore,
     Notification,
+    NotificationPreference,
     Message,
+    TeleconsultSession,
     User,
 )
 from src.shared.audit import log_action
@@ -1471,6 +1473,159 @@ async def mark_my_message_read(
         )
         await db.commit()
     return _serialize_message(msg, sender)
+
+
+# ===========================================================================
+# Notifications RDV — préférences et liste RDV futurs (Phase 2.3)
+# ===========================================================================
+
+
+class NotifPreferencesResponse(BaseModel):
+    push_enabled: bool
+    sms_enabled: bool
+    email_enabled: bool
+    rdv_reminder_24h: bool
+    rdv_reminder_1h: bool
+    rdv_reminder_now: bool
+    push_token: Optional[str]
+    phone_e164: Optional[str]
+
+
+class NotifPreferencesUpdate(BaseModel):
+    push_enabled: Optional[bool] = None
+    sms_enabled: Optional[bool] = None
+    email_enabled: Optional[bool] = None
+    rdv_reminder_24h: Optional[bool] = None
+    rdv_reminder_1h: Optional[bool] = None
+    rdv_reminder_now: Optional[bool] = None
+    push_token: Optional[str] = None
+    phone_e164: Optional[str] = None
+
+
+class UpcomingAppointment(BaseModel):
+    id: str
+    scheduled_at: str
+    doctor_name: str
+    speciality: str
+    status: str
+    reason: Optional[str]
+    jitsi_room_id: Optional[str]
+
+
+def _serialize_prefs(p: NotificationPreference) -> NotifPreferencesResponse:
+    return NotifPreferencesResponse(
+        push_enabled=p.push_enabled,
+        sms_enabled=p.sms_enabled,
+        email_enabled=p.email_enabled,
+        rdv_reminder_24h=p.rdv_reminder_24h,
+        rdv_reminder_1h=p.rdv_reminder_1h,
+        rdv_reminder_now=p.rdv_reminder_now,
+        push_token=p.push_token,
+        phone_e164=p.phone_e164,
+    )
+
+
+async def _get_or_create_prefs(
+    db: AsyncSession, user_id: str
+) -> NotificationPreference:
+    res = await db.execute(
+        select(NotificationPreference).where(NotificationPreference.user_id == user_id)
+    )
+    prefs = res.scalar_one_or_none()
+    if prefs is None:
+        prefs = NotificationPreference(user_id=user_id)
+        db.add(prefs)
+        await db.flush()
+    return prefs
+
+
+@app.get(
+    "/patients/me/notification-preferences",
+    response_model=NotifPreferencesResponse,
+)
+async def get_my_notif_preferences(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Préférences de notification de l'utilisateur connecté (crée si absent)."""
+    prefs = await _get_or_create_prefs(db, current_user["user_id"])
+    await db.commit()
+    return _serialize_prefs(prefs)
+
+
+@app.patch(
+    "/patients/me/notification-preferences",
+    response_model=NotifPreferencesResponse,
+)
+async def update_my_notif_preferences(
+    payload: NotifPreferencesUpdate,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Met à jour partiellement les préférences (les champs `null` sont ignorés)."""
+    prefs = await _get_or_create_prefs(db, current_user["user_id"])
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(prefs, field, value)
+    await log_action(
+        db,
+        user_id=current_user["user_id"],
+        action="update_notif_preferences",
+        resource="notification_preferences",
+        resource_id=current_user["user_id"],
+        details=payload.model_dump(exclude_unset=True),
+    )
+    await db.commit()
+    return _serialize_prefs(prefs)
+
+
+@app.get("/patients/me/appointments", response_model=list[UpcomingAppointment])
+async def list_my_appointments(
+    upcoming_only: bool = Query(True),
+    limit: int = Query(20, ge=1, le=100),
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Liste les RDV (téléconsultations) du patient connecté."""
+    from src.shared.models import DoctorProfile
+
+    # Récupère le patient depuis user_id
+    res = await db.execute(
+        select(Patient).where(Patient.user_id == current_user["user_id"])
+    )
+    patient = res.scalar_one_or_none()
+    if patient is None:
+        # Pas de profil patient → retourne liste vide
+        return []
+
+    stmt = (
+        select(TeleconsultSession, DoctorProfile)
+        .join(
+            DoctorProfile,
+            DoctorProfile.user_id == TeleconsultSession.psychiatrist_id,
+            isouter=True,
+        )
+        .where(TeleconsultSession.patient_id == patient.id)
+    )
+    if upcoming_only:
+        stmt = stmt.where(TeleconsultSession.scheduled_at >= func.now())
+    stmt = stmt.order_by(TeleconsultSession.scheduled_at.asc()).limit(limit)
+
+    res = await db.execute(stmt)
+    rows = res.all()
+    return [
+        UpcomingAppointment(
+            id=str(s.id),
+            scheduled_at=s.scheduled_at.isoformat() if s.scheduled_at else "",
+            doctor_name=(
+                f"{d.first_name} {d.last_name}" if d else "Praticien"
+            ),
+            speciality=d.speciality if d else "Psychiatrie",
+            status=s.status.value if s.status else "scheduled",
+            reason=s.reason,
+            jitsi_room_id=s.jitsi_room_id,
+        )
+        for (s, d) in rows
+    ]
 
 
 # ---------------------------------------------------------------------------

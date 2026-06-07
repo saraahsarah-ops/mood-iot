@@ -146,10 +146,30 @@ def _notif_to_response(n: Notification) -> NotificationResponse:
 # ---------------------------------------------------------------------------
 
 
+_rdv_scheduler = None  # type: ignore[var-annotated]
+
+
 @app.on_event("startup")
 async def on_startup():
+    global _rdv_scheduler
     logger.info("Service Notification demarre sur le port 8004")
     logger.info("Seuils d'escalade : %s", settings.scoring_thresholds_tuple)
+    # Demarrage du scheduler des rappels RDV (J-1 / H-1 / H0)
+    try:
+        from src.notification.rdv_scheduler import start_scheduler
+        _rdv_scheduler = start_scheduler()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Echec du demarrage du scheduler RDV : %s", exc)
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    global _rdv_scheduler
+    if _rdv_scheduler is not None:
+        try:
+            _rdv_scheduler.shutdown(wait=False)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -540,6 +560,47 @@ async def websocket_alerts(websocket: WebSocket, user_id: str):
     except WebSocketDisconnect:
         ws_channel.unregister(user_id)
         logger.info("WebSocket deconnecte pour user %s", user_id)
+
+
+# ===========================================================================
+# Rappels RDV multicanal (Phase 2.3)
+# ===========================================================================
+
+
+from src.notification.rdv_reminder_service import send_reminder as _send_rdv_reminder
+
+
+class RdvReminderResponse(BaseModel):
+    session_id: str
+    kind: str  # "24h" | "1h" | "now"
+    results: dict[str, bool]
+
+
+@app.post(
+    "/notifications/rdv/{session_id}/reminder/{kind}",
+    response_model=RdvReminderResponse,
+)
+async def trigger_rdv_reminder(
+    session_id: str,
+    kind: str,  # "24h" | "1h" | "now"
+    current_user: dict = Depends(require_role("admin", "psychiatre")),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Déclenche manuellement un rappel RDV (utilisé pour les tests + l'admin
+    qui veut renvoyer un rappel raté). En prod, le scheduler appelle la même
+    fonction métier.
+    """
+    if kind not in ("24h", "1h", "now"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="kind doit être '24h', '1h' ou 'now'",
+        )
+    from uuid import UUID as _UUID
+    results = await _send_rdv_reminder(db, _UUID(session_id), kind)  # type: ignore[arg-type]
+    return RdvReminderResponse(
+        session_id=session_id, kind=kind, results=results
+    )
 
 
 # ---------------------------------------------------------------------------

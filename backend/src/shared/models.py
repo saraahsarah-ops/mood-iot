@@ -84,6 +84,8 @@ class NotificationType(str, enum.Enum):
     alerte_psychiatre = "alerte_psychiatre"
     urgence = "urgence"
     system = "system"
+    # Rappels RDV (Phase 2.3) — émis par le scheduler J-1 / H-1 / H0
+    rdv_rappel = "rdv_rappel"
 
 
 class NotificationChannel(str, enum.Enum):
@@ -908,3 +910,60 @@ class Message(Base):
     # -- Relations --
     sender: Mapped["User"] = relationship(foreign_keys=[sender_id])
     recipient: Mapped["User"] = relationship(foreign_keys=[recipient_id])
+
+
+class NotificationPreference(Base):
+    """Préférences de notification d'un utilisateur (1:1 avec users)."""
+
+    __tablename__ = "notification_preferences"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    push_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    sms_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    email_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    rdv_reminder_24h: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
+    rdv_reminder_1h: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
+    rdv_reminder_now: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
+    push_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    phone_e164: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    user: Mapped["User"] = relationship(foreign_keys=[user_id])
+
+
+class RdvReminderLog(Base):
+    """Trace des rappels RDV émis (idempotence du scheduler)."""
+
+    __tablename__ = "rdv_reminder_log"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("teleconsult_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    reminder_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    channel: Mapped[str] = mapped_column(String(16), nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    notification_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("notifications.id", ondelete="SET NULL"),
+        nullable=True,
+    )
