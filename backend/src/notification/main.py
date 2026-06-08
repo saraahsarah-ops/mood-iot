@@ -568,6 +568,49 @@ async def websocket_alerts(websocket: WebSocket, user_id: str):
 
 
 from src.notification.rdv_reminder_service import send_reminder as _send_rdv_reminder
+from src.notification.ai_coach import send_ai_coaching as _send_ai_coaching
+
+
+class AiCoachingRequest(BaseModel):
+    """Optionnel — si non fourni, le service utilise un prompt générique."""
+
+    risk_score: Optional[float] = None
+    top_factors: Optional[list[str]] = None
+    explanation: Optional[str] = None
+
+
+class AiCoachingResponse(BaseModel):
+    patient_id: str
+    results: dict[str, bool]
+
+
+@app.post(
+    "/notifications/ai-coaching/{patient_id}",
+    response_model=AiCoachingResponse,
+)
+async def trigger_ai_coaching(
+    patient_id: str,
+    payload: Optional[AiCoachingRequest] = None,
+    current_user: dict = Depends(require_role("admin", "psychiatre")),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Déclenche une recommandation IA pour un patient.
+
+    Utilisé :
+    - par le service `scoring` après détection d'une anomalie (call interne)
+    - par un médecin/admin pour relancer manuellement un coaching
+    """
+    from uuid import UUID as _UUID
+    p = payload or AiCoachingRequest()
+    results = await _send_ai_coaching(
+        db,
+        _UUID(patient_id),
+        risk_score=p.risk_score,
+        top_factors=p.top_factors,
+        explanation=p.explanation or "",
+    )
+    return AiCoachingResponse(patient_id=patient_id, results=results)
 
 
 class RdvReminderResponse(BaseModel):
