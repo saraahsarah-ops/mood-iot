@@ -3,6 +3,7 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@/stores/authStore";
 import { hasSeenOnboarding } from "./(auth)/onboarding";
+import { getPermissionsState } from "@/services/healthSync";
 
 export default function RootLayout() {
   const tokens = useAuthStore((s) => s.tokens);
@@ -47,8 +48,17 @@ export default function RootLayout() {
         router.replace("/(auth)/welcome");
       }
     } else if (inAuth) {
-      // Connecté + profil → app principale
-      router.replace("/(tabs)");
+      // Connecté + profil. Avant les tabs : vérifier permissions santé (1 seule fois).
+      const atHealthPerms =
+        segs[0] === "(auth)" && segs[1] === "health-permissions";
+      if (atHealthPerms) return;
+      void getPermissionsState().then((p) => {
+        if (!p.hasAsked) {
+          router.replace("/(auth)/health-permissions");
+        } else {
+          router.replace("/(tabs)");
+        }
+      });
     }
   }, [tokens, user, loading, segments, router, onboardingChecked, onboardingSeen]);
 

@@ -1,8 +1,24 @@
 import { View, Text, TouchableOpacity, StyleSheet, Alert, Switch } from "react-native";
-import { useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { router } from "expo-router";
 import { useAuthStore } from "@/stores/authStore";
 import { useHealthStore } from "@/stores/healthStore";
+import {
+  getLastSyncAt,
+  getPermissionsState,
+  requestPermissions,
+} from "@/services/healthSync";
+
+function formatRelative(d: Date): string {
+  const diffMs = Date.now() - d.getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "à l'instant";
+  if (mins < 60) return `il y a ${mins} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `il y a ${hours} h`;
+  const days = Math.floor(hours / 24);
+  return `il y a ${days} j`;
+}
 
 export default function SettingsScreen() {
   const user = useAuthStore((s) => s.user);
@@ -10,14 +26,47 @@ export default function SettingsScreen() {
   const syncNow = useHealthStore((s) => s.syncHealthData);
   const [autoSync, setAutoSync] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<string | null>(null);
+  const [permGranted, setPermGranted] = useState<boolean>(false);
+
+  const refreshState = useCallback(async () => {
+    const d = await getLastSyncAt();
+    setLastSync(d ? formatRelative(d) : null);
+    const p = await getPermissionsState();
+    setPermGranted(p.granted);
+  }, []);
+
+  useEffect(() => {
+    void refreshState();
+  }, [refreshState]);
 
   async function handleSync() {
+    if (!permGranted) {
+      Alert.alert(
+        "Autorisations requises",
+        "Vous devez d'abord autoriser l'accès à Health Connect.",
+        [
+          { text: "Annuler", style: "cancel" },
+          {
+            text: "Autoriser",
+            onPress: async () => {
+              const ok = await requestPermissions();
+              setPermGranted(ok);
+              if (ok) await handleSync();
+            },
+          },
+        ],
+      );
+      return;
+    }
     setSyncing(true);
     try {
       await syncNow();
-      Alert.alert("Synchronisation", "Donnees synchronisees avec succes !");
-    } catch {
-      Alert.alert("Erreur", "Echec de la synchronisation.");
+      await refreshState();
+      Alert.alert("Synchronisation", "Données synchronisées avec succès !");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Échec de la synchronisation.";
+      Alert.alert("Erreur", msg);
     } finally {
       setSyncing(false);
     }
@@ -44,8 +93,24 @@ export default function SettingsScreen() {
       </View>
 
       {/* Health Sync */}
-      <Text style={styles.sectionTitle}>Donnees de sante</Text>
+      <Text style={styles.sectionTitle}>Données de santé</Text>
       <View style={styles.card}>
+        <SettingRow
+          emoji={permGranted ? "✅" : "⚠️"}
+          label="Health Connect"
+          right={
+            <Text style={styles.infoText}>
+              {permGranted ? "Autorisé" : "Non autorisé"}
+            </Text>
+          }
+        />
+        <SettingRow
+          emoji="🕒"
+          label="Dernière synchronisation"
+          right={
+            <Text style={styles.infoText}>{lastSync ?? "Jamais"}</Text>
+          }
+        />
         <SettingRow
           emoji="🔄"
           label="Sync automatique"
@@ -61,6 +126,8 @@ export default function SettingsScreen() {
           style={styles.syncButton}
           onPress={handleSync}
           disabled={syncing}
+          accessibilityRole="button"
+          accessibilityLabel="Synchroniser les données maintenant"
         >
           <Text style={styles.syncButtonText}>
             {syncing ? "Synchronisation..." : "📤 Synchroniser maintenant"}

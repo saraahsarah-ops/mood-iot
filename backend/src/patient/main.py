@@ -4,7 +4,7 @@ Gestion des dossiers patients, mood entries (PHQ-9), baseline, consentements.
 Connecte a PostgreSQL via SQLAlchemy async.
 """
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional
 from uuid import uuid4
@@ -945,6 +945,130 @@ async def _sync_one_entry(
         synced_at=now.isoformat(),
         upserted=was_existing,
     )
+
+
+# ── /me/* — variantes patient-scoped (anti-IDOR) ───────────────────────────
+
+
+async def _resolve_my_patient_id(
+    db: AsyncSession, current_user: dict
+) -> str:
+    """Récupère l'ID du Patient lié au user courant (404 si pas patient)."""
+    res = await db.execute(
+        select(Patient).where(Patient.user_id == current_user["user_id"])
+    )
+    patient = res.scalar_one_or_none()
+    if patient is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profil patient introuvable",
+        )
+    return str(patient.id)
+
+
+class SyncStatusResponse(BaseModel):
+    last_sync_at: Optional[str] = None
+    last_date_synced: Optional[str] = None
+    source_platform: Optional[str] = None
+    days_synced_last_30: int = 0
+
+
+@app.get("/patients/me/health-data/status", response_model=SyncStatusResponse)
+async def my_health_sync_status(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Statut de synchronisation des capteurs du patient connecté."""
+    patient_id = await _resolve_my_patient_id(db, current_user)
+    # Dernier enregistrement
+    res = await db.execute(
+        select(DailyAggregate)
+        .where(DailyAggregate.patient_id == patient_id)
+        .order_by(DailyAggregate.date.desc())
+        .limit(1)
+    )
+    latest = res.scalar_one_or_none()
+    # Compteur 30 derniers jours
+    thirty_days_ago = (datetime.now(timezone.utc).date() - timedelta(days=30))
+    res2 = await db.execute(
+        select(func.count(DailyAggregate.id))
+        .where(DailyAggregate.patient_id == patient_id)
+        .where(DailyAggregate.date >= thirty_days_ago)
+    )
+    days_count = int(res2.scalar() or 0)
+    return SyncStatusResponse(
+        last_sync_at=(
+            latest.updated_at.isoformat()
+            if latest and getattr(latest, "updated_at", None)
+            else (latest.date.isoformat() if latest else None)
+        ),
+        last_date_synced=latest.date.isoformat() if latest else None,
+        source_platform=getattr(latest, "source_platform", None) if latest else None,
+        days_synced_last_30=days_count,
+    )
+
+
+@app.post(
+    "/patients/me/health-data",
+    response_model=HealthDataSyncResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def sync_my_health_data(
+    payload: HealthDataSync,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Envoie un agrégat quotidien pour le patient connecté."""
+    patient_id = await _resolve_my_patient_id(db, current_user)
+    if payload.source_platform not in VALID_PLATFORMS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"source_platform doit etre l'un de : {VALID_PLATFORMS}",
+        )
+    result = await _sync_one_entry(patient_id, payload, db)
+    await db.commit()
+    await _trigger_scoring(patient_id, payload.date)
+    return result
+
+
+@app.post(
+    "/patients/me/health-data/batch",
+    response_model=HealthDataBatchResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def sync_my_health_data_batch(
+    payload: list[HealthDataSync],
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Batch sync pour le patient connecté (max 90 jours)."""
+    patient_id = await _resolve_my_patient_id(db, current_user)
+    if len(payload) > 90:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Maximum 90 jours par batch",
+        )
+    results = []
+    for entry in payload:
+        if entry.source_platform not in VALID_PLATFORMS:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"source_platform invalide pour la date {entry.date}",
+            )
+        results.append(await _sync_one_entry(patient_id, entry, db))
+    await db.commit()
+    if results:
+        latest_date = max(entry.date for entry in payload)
+        await _trigger_scoring(patient_id, latest_date)
+    return HealthDataBatchResponse(
+        patient_id=patient_id,
+        synced_count=len(results),
+        synced_at=datetime.now(timezone.utc).isoformat(),
+        results=results,
+    )
+
+
+# ── /{patient_id}/* — legacy (dashboard médecin) ───────────────────────────
 
 
 @app.post(
