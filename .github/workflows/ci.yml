@@ -1,0 +1,173 @@
+# =============================================================================
+# Mood-IoT CI/CD
+#
+# Trigger      : push sur main, push sur audit/modernization, PR vers main
+# Jobs         :
+#   1. lint          → ruff (backend) + eslint (mobile/dashboard)
+#   2. test-backend  → pytest + couverture
+#   3. test-mobile   → tsc + jest
+#   4. build-images  → docker buildx push (uniquement push main)
+#   5. deploy-prod   → helm upgrade (manuel, workflow_dispatch)
+#
+# Secrets requis (GitHub repo > Settings > Secrets) :
+#   OVH_REGISTRY_USER, OVH_REGISTRY_TOKEN
+#   KUBECONFIG_PROD (kubeconfig encodé base64)
+# =============================================================================
+
+name: CI/CD
+
+on:
+  push:
+    branches: [main, audit/modernization]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Cible de déploiement"
+        type: choice
+        options: [staging, production]
+        required: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+
+jobs:
+  # ── 1. Lint ──────────────────────────────────────────────────────────────
+  lint-backend:
+    name: Lint backend (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install ruff
+      - run: ruff check backend/src
+
+  lint-mobile:
+    name: Lint mobile (eslint + tsc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/mobile/package-lock.json
+      - run: npm ci
+        working-directory: frontend/mobile
+      - run: npx tsc --noEmit
+        working-directory: frontend/mobile
+
+  # ── 2. Tests backend ────────────────────────────────────────────────────
+  test-backend:
+    name: Tests backend (pytest)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: mood_user
+          POSTGRES_PASSWORD: mood_secret_2026
+          POSTGRES_DB: mood_iot_test
+        options: >-
+          --health-cmd "pg_isready -U mood_user"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt
+        working-directory: backend
+      - run: pip install pytest pytest-asyncio pytest-cov
+      - name: Run tests
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://mood_user:mood_secret_2026@localhost:5432/mood_iot_test
+          REDIS_URL: redis://localhost:6379/0
+          JWT_SECRET_KEY: ci-test-secret-32-chars-long-please
+          KEYCLOAK_ISSUER: http://fake-keycloak.test/realms/moodiot
+          ENVIRONMENT: test
+        run: pytest -v --cov=src --cov-report=xml --cov-report=term-missing
+      - uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          file: backend/coverage.xml
+
+  # ── 3. Build & push images Docker (main only) ───────────────────────────
+  build-images:
+    name: Build & push (${{ matrix.service }})
+    needs: [lint-backend, lint-mobile, test-backend]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [gateway, auth, patient, scoring, notification, doctor, teleconsult]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: registry.gra.cloud.ovh.net
+          username: ${{ secrets.OVH_REGISTRY_USER }}
+          password: ${{ secrets.OVH_REGISTRY_TOKEN }}
+      - name: Build & push ${{ matrix.service }}
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/infrastructure/docker/Dockerfile
+          build-args: |
+            SERVICE_NAME=${{ matrix.service }}
+          push: true
+          tags: |
+            registry.gra.cloud.ovh.net/mood-iot/${{ matrix.service }}:latest
+            registry.gra.cloud.ovh.net/mood-iot/${{ matrix.service }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  # ── 4. Déploiement production (manuel uniquement) ───────────────────────
+  deploy-prod:
+    name: Deploy → OVH HDS (${{ inputs.environment }})
+    needs: [build-images]
+    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.moodiot.fr
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_PROD }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.0
+      - name: Helm upgrade
+        run: |
+          helm upgrade mood-iot ./infrastructure/helm/mood-iot \
+            --namespace mood-iot \
+            --values infrastructure/helm/mood-iot/values.prod.yaml \
+            --set image.tag=${{ github.sha }} \
+            --wait --timeout 10m
+      - name: Smoke test
+        run: |
+          curl -fsS https://api.moodiot.fr/api/v1/health || exit 1
