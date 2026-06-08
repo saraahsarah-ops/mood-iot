@@ -19,6 +19,7 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import * as SecureStore from "expo-secure-store";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { palette, light, space, radius, font } from "@/theme/tokens";
 
 interface Slide {
@@ -68,6 +69,7 @@ const ONBOARDING_DONE_KEY = "onboarding_seen_v1";
 export default function OnboardingScreen() {
   const [index, setIndex] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
+  const insets = useSafeAreaInsets();
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const i = Math.round(e.nativeEvent.contentOffset.x / width);
@@ -89,7 +91,12 @@ export default function OnboardingScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        { paddingTop: insets.top },
+      ]}
+    >
       <ScrollView
         ref={scrollRef}
         horizontal
@@ -128,7 +135,12 @@ export default function OnboardingScreen() {
       </View>
 
       {/* Actions */}
-      <View style={styles.actions}>
+      <View
+        style={[
+          styles.actions,
+          { paddingBottom: Math.max(insets.bottom + space.md, space["3xl"]) },
+        ]}
+      >
         <Pressable
           onPress={() => void finish()}
           style={styles.skipBtn}
@@ -208,7 +220,7 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: "row",
     paddingHorizontal: space["2xl"],
-    paddingBottom: space["3xl"],
+    paddingTop: space.md,
     gap: space.md,
   },
   skipBtn: {

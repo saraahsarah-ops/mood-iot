@@ -20,6 +20,7 @@ import {
   View,
 } from "react-native";
 import { router } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   requestPermissions,
   markPermissionsAsked,
@@ -58,6 +59,7 @@ const PERMISSIONS_LIST = [
 export default function HealthPermissionsScreen() {
   const [loading, setLoading] = useState(false);
   const platform = getSupportedPlatform();
+  const insets = useSafeAreaInsets();
 
   const onAccept = async () => {
     setLoading(true);
@@ -81,7 +83,15 @@ export default function HealthPermissionsScreen() {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView
+      contentContainerStyle={[
+        styles.container,
+        {
+          paddingTop: insets.top + space.xl,
+          paddingBottom: Math.max(insets.bottom + space.md, space["4xl"]),
+        },
+      ]}
+    >
       <View style={styles.iconCircle}>
         <Text style={styles.iconEmoji}>📲</Text>
       </View>
@@ -155,8 +165,7 @@ const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
     backgroundColor: light.bg,
-    padding: space.xl,
-    paddingTop: space["4xl"],
+    paddingHorizontal: space.xl,
   },
   iconCircle: {
     alignSelf: "center",
