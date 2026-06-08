@@ -1,206 +1,398 @@
-import { useState } from "react";
+/**
+ * Écran "Humeur" — saisie simple par emoji.
+ *
+ * Le patient choisit un emoji (1-7), ajoute optionnellement une note courte,
+ * et enregistre. Affiche en dessous l'historique récent.
+ *
+ * Phase 2.5 phase 2 (à venir) ajoutera la saisie vocale avec analyse IA.
+ */
+
+import { useEffect, useState, useCallback } from "react";
 import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  StyleSheet,
+  ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
-import { useHealthStore } from "@/stores/healthStore";
+import { format, isToday, isYesterday } from "date-fns";
+import { fr } from "date-fns/locale";
+import {
+  deleteLatestHumeur,
+  fetchHumeurHistory,
+  submitHumeurEmoji,
+  type HumeurEntry,
+} from "@/services/api";
 
-const PHQ9_QUESTIONS = [
-  "Peu d'interet ou de plaisir a faire les choses",
-  "Se sentir triste, deprime(e) ou sans espoir",
-  "Difficultes a s'endormir, sommeil interrompu ou trop dormir",
-  "Se sentir fatigue(e) ou manquer d'energie",
-  "Peu d'appetit ou manger trop",
-  "Mauvaise opinion de soi-meme",
-  "Difficultes a se concentrer",
-  "Se deplacer ou parler lentement / etre agite(e)",
-  "Penser qu'il vaudrait mieux mourir ou se faire du mal",
+interface EmojiOption {
+  level: number;
+  emoji: string;
+  label: string;
+  color: string;
+}
+
+const EMOJIS: EmojiOption[] = [
+  { level: 1, emoji: "😢", label: "Très mal",     color: "#c0392b" },
+  { level: 2, emoji: "😟", label: "Mal",          color: "#e67e22" },
+  { level: 3, emoji: "😕", label: "Pas terrible", color: "#f39c12" },
+  { level: 4, emoji: "😐", label: "Neutre",       color: "#7f8c8d" },
+  { level: 5, emoji: "🙂", label: "Bien",         color: "#27ae60" },
+  { level: 6, emoji: "😊", label: "Très bien",    color: "#2ecc71" },
+  { level: 7, emoji: "😄", label: "Excellent",    color: "#16a085" },
 ];
 
-const SCORE_LABELS = [
-  { value: 0, label: "Pas du tout", emoji: "😊" },
-  { value: 1, label: "Plusieurs jours", emoji: "😐" },
-  { value: 2, label: "Plus de la moitie", emoji: "😟" },
-  { value: 3, label: "Presque tous les jours", emoji: "😞" },
-];
+const NOTE_MAX = 280;
 
 export default function MoodScreen() {
-  const [answers, setAnswers] = useState<number[]>(Array(9).fill(-1));
-  const [submitted, setSubmitted] = useState(false);
-  const submitPhq9 = useHealthStore((s) => s.submitPhq9);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [history, setHistory] = useState<HumeurEntry[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function setAnswer(qIndex: number, value: number) {
-    const next = [...answers];
-    next[qIndex] = value;
-    setAnswers(next);
-  }
-
-  const allAnswered = answers.every((a) => a >= 0);
-  const total = answers.reduce((s, v) => s + Math.max(0, v), 0);
-
-  async function handleSubmit() {
-    if (!allAnswered) return;
+  const loadHistory = useCallback(async () => {
+    setLoadingHistory(true);
     try {
-      await submitPhq9(answers);
-      setSubmitted(true);
+      const items = await fetchHumeurHistory(10);
+      setHistory(items);
     } catch {
-      Alert.alert("Erreur", "Impossible d'envoyer le questionnaire.");
+      /* ignore — l'historique n'est pas critique pour la saisie */
+    } finally {
+      setLoadingHistory(false);
     }
-  }
+  }, []);
 
-  if (submitted) {
-    const severity =
-      total <= 4
-        ? { label: "Minimal", emoji: "🟢", color: "#2ecc71" }
-        : total <= 9
-          ? { label: "Leger", emoji: "🟡", color: "#f39c12" }
-          : total <= 14
-            ? { label: "Modere", emoji: "🟠", color: "#e67e22" }
-            : { label: "Severe", emoji: "🔴", color: "#e74c3c" };
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory]);
 
-    return (
-      <View style={[styles.container, styles.resultContainer]}>
-        <Text style={styles.resultEmoji}>{severity.emoji}</Text>
-        <Text style={styles.resultTitle}>Questionnaire envoye</Text>
-        <Text style={[styles.resultScore, { color: severity.color }]}>
-          Score PHQ-9 : {total}/27
-        </Text>
-        <Text style={styles.resultLabel}>Niveau : {severity.label}</Text>
-        <Text style={styles.resultInfo}>
-          Votre medecin recevra ces informations pour mieux vous accompagner.
-        </Text>
-        <TouchableOpacity
-          style={styles.retryButton}
-          onPress={() => {
-            setAnswers(Array(9).fill(-1));
-            setSubmitted(false);
-          }}
-        >
-          <Text style={styles.retryText}>Refaire le questionnaire</Text>
-        </TouchableOpacity>
-      </View>
+  const onSubmit = async () => {
+    if (selected === null) {
+      Alert.alert("Choix requis", "Veuillez sélectionner un emoji.");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await submitHumeurEmoji(selected, note);
+      setSelected(null);
+      setNote("");
+      await loadHistory();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Impossible d'enregistrer l'humeur",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const onDeleteLast = () => {
+    Alert.alert(
+      "Supprimer cette saisie ?",
+      "Vous ne pouvez modifier que votre dernière saisie.",
+      [
+        { text: "Annuler", style: "cancel" },
+        {
+          text: "Supprimer",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await deleteLatestHumeur();
+              await loadHistory();
+            } catch {
+              Alert.alert(
+                "Erreur",
+                "Suppression impossible. Réessayez plus tard.",
+              );
+            }
+          },
+        },
+      ],
     );
-  }
+  };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.header}>Comment vous sentez-vous ?</Text>
-      <Text style={styles.subheader}>
-        Au cours des 2 dernieres semaines, a quelle frequence avez-vous ete
-        gene(e) par les problemes suivants ?
-      </Text>
+    <KeyboardAvoidingView
+      style={styles.kav}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        refreshControl={
+          <RefreshControl refreshing={loadingHistory} onRefresh={loadHistory} />
+        }
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={styles.question}>Comment vous sentez-vous ?</Text>
+        <Text style={styles.help}>
+          Choisissez l&apos;émoji qui correspond le mieux à votre humeur, là, maintenant.
+        </Text>
 
-      {PHQ9_QUESTIONS.map((q, qi) => (
-        <View key={qi} style={styles.questionBlock}>
-          <Text style={styles.questionText}>
-            {qi + 1}. {q}
-          </Text>
-          <View style={styles.optionsRow}>
-            {SCORE_LABELS.map((opt) => (
-              <TouchableOpacity
-                key={opt.value}
-                style={[
-                  styles.optionButton,
-                  answers[qi] === opt.value && styles.optionSelected,
+        <View style={styles.emojiGrid}>
+          {EMOJIS.map((opt) => {
+            const isSelected = selected === opt.level;
+            return (
+              <Pressable
+                key={opt.level}
+                onPress={() => setSelected(opt.level)}
+                style={({ pressed }) => [
+                  styles.emojiCard,
+                  isSelected && {
+                    backgroundColor: opt.color + "15",
+                    borderColor: opt.color,
+                  },
+                  pressed && { opacity: 0.7 },
                 ]}
-                onPress={() => setAnswer(qi, opt.value)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: isSelected }}
+                accessibilityLabel={`Humeur ${opt.label}`}
               >
-                <Text style={styles.optionEmoji}>{opt.emoji}</Text>
+                <Text style={styles.emojiBig}>{opt.emoji}</Text>
                 <Text
                   style={[
-                    styles.optionLabel,
-                    answers[qi] === opt.value && styles.optionLabelSelected,
+                    styles.emojiLabel,
+                    isSelected && { color: opt.color, fontWeight: "700" },
                   ]}
-                  numberOfLines={2}
                 >
                   {opt.label}
                 </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+              </Pressable>
+            );
+          })}
         </View>
-      ))}
 
-      <TouchableOpacity
-        style={[styles.submitButton, !allAnswered && styles.submitDisabled]}
-        onPress={handleSubmit}
-        disabled={!allAnswered}
-      >
-        <Text style={styles.submitText}>
-          Envoyer ({answers.filter((a) => a >= 0).length}/9)
+        <Text style={styles.label}>Une note (facultatif)</Text>
+        <TextInput
+          style={styles.noteInput}
+          value={note}
+          onChangeText={(t) => t.length <= NOTE_MAX && setNote(t)}
+          placeholder="Ce qui se passe, ce que vous ressentez…"
+          placeholderTextColor="#aaa"
+          multiline
+          numberOfLines={3}
+          accessibilityLabel="Note libre"
+        />
+        <Text style={styles.charCounter}>
+          {note.length}/{NOTE_MAX}
         </Text>
-      </TouchableOpacity>
-    </ScrollView>
+
+        {error ? (
+          <View style={styles.errorBox} accessibilityRole="alert">
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+
+        <Pressable
+          style={({ pressed }) => [
+            styles.submitBtn,
+            (selected === null || submitting) && styles.submitBtnDisabled,
+            pressed && selected !== null && styles.submitBtnPressed,
+          ]}
+          onPress={onSubmit}
+          disabled={selected === null || submitting}
+          accessibilityRole="button"
+          accessibilityLabel="Enregistrer cette humeur"
+        >
+          {submitting ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.submitText}>Enregistrer</Text>
+          )}
+        </Pressable>
+
+        <View style={styles.historyHeader}>
+          <Text style={styles.historyTitle}>Mes dernières saisies</Text>
+        </View>
+        {history.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyEmoji}>🌱</Text>
+            <Text style={styles.emptyText}>
+              Vos saisies apparaîtront ici. Commencez quand vous voulez !
+            </Text>
+          </View>
+        ) : (
+          history.map((h, idx) => (
+            <HumeurRow
+              key={h.id}
+              entry={h}
+              isLatest={idx === 0}
+              onDelete={onDeleteLast}
+            />
+          ))
+        )}
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+interface HumeurRowProps {
+  entry: HumeurEntry;
+  isLatest: boolean;
+  onDelete: () => void;
+}
+
+function HumeurRow({ entry, isLatest, onDelete }: HumeurRowProps) {
+  const opt = EMOJIS.find((e) => e.level === entry.emoji_level);
+  const date = new Date(entry.created_at);
+  const dateLabel = isToday(date)
+    ? `Aujourd'hui, ${format(date, "HH:mm")}`
+    : isYesterday(date)
+      ? `Hier, ${format(date, "HH:mm")}`
+      : format(date, "EEEE d MMM 'à' HH:mm", { locale: fr });
+
+  return (
+    <View style={styles.historyRow}>
+      <Text style={styles.historyEmoji}>{opt?.emoji ?? "❓"}</Text>
+      <View style={styles.historyText}>
+        <Text style={styles.historyLabel}>{opt?.label ?? "Saisie"}</Text>
+        <Text style={styles.historyDate}>{dateLabel}</Text>
+        {entry.note ? (
+          <Text style={styles.historyNote} numberOfLines={2}>
+            « {entry.note} »
+          </Text>
+        ) : null}
+      </View>
+      {isLatest ? (
+        <Pressable
+          onPress={onDelete}
+          style={styles.deleteBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Supprimer la dernière saisie"
+          hitSlop={8}
+        >
+          <Text style={styles.deleteIcon}>🗑️</Text>
+        </Pressable>
+      ) : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f0f7ff" },
-  content: { padding: 20, paddingBottom: 40 },
-  header: { fontSize: 22, fontWeight: "700", color: "#333" },
-  subheader: { fontSize: 13, color: "#777", marginTop: 6, marginBottom: 20 },
-  questionBlock: {
+  kav: { flex: 1, backgroundColor: "#f0f7ff" },
+  scroll: { padding: 20, paddingBottom: 60 },
+
+  question: { fontSize: 22, fontWeight: "700", color: "#222", marginBottom: 6 },
+  help: { fontSize: 14, color: "#666", marginBottom: 20, lineHeight: 20 },
+
+  emojiGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    justifyContent: "center",
+  },
+  emojiCard: {
+    width: "30%",
+    minWidth: 100,
     backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  questionText: { fontSize: 14, fontWeight: "500", color: "#444", marginBottom: 10 },
-  optionsRow: { flexDirection: "row", gap: 6 },
-  optionButton: {
-    flex: 1,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: "#e5edf5",
+    padding: 12,
     alignItems: "center",
-    paddingVertical: 8,
-    paddingHorizontal: 4,
+  },
+  emojiBig: { fontSize: 40, marginBottom: 6 },
+  emojiLabel: {
+    fontSize: 12,
+    color: "#555",
+    textAlign: "center",
+    fontWeight: "500",
+  },
+
+  label: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#444",
+    marginTop: 24,
+    marginBottom: 8,
+  },
+  noteInput: {
+    backgroundColor: "#fff",
+    borderColor: "#e5edf5",
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 15,
+    minHeight: 90,
+    textAlignVertical: "top",
+    color: "#222",
+  },
+  charCounter: {
+    fontSize: 11,
+    color: "#999",
+    textAlign: "right",
+    marginTop: 4,
+  },
+
+  errorBox: {
+    backgroundColor: "#fdecea",
+    borderColor: "#f5b7b1",
+    borderWidth: 1,
     borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: "#e0e0e0",
-    backgroundColor: "#fafafa",
+    padding: 12,
+    marginTop: 12,
   },
-  optionSelected: {
-    borderColor: "#0288d1",
-    backgroundColor: "#e3f2fd",
-  },
-  optionEmoji: { fontSize: 20, marginBottom: 2 },
-  optionLabel: { fontSize: 9, color: "#777", textAlign: "center" },
-  optionLabelSelected: { color: "#0288d1", fontWeight: "600" },
-  submitButton: {
+  errorText: { color: "#c0392b", fontSize: 13 },
+
+  submitBtn: {
+    height: 52,
     backgroundColor: "#0288d1",
     borderRadius: 14,
-    paddingVertical: 16,
+    justifyContent: "center",
     alignItems: "center",
-    marginTop: 8,
+    marginTop: 20,
+    shadowColor: "#0288d1",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  submitDisabled: { opacity: 0.4 },
-  submitText: { color: "#fff", fontSize: 16, fontWeight: "600" },
-  resultContainer: { justifyContent: "center", alignItems: "center", padding: 32 },
-  resultEmoji: { fontSize: 60, marginBottom: 12 },
-  resultTitle: { fontSize: 22, fontWeight: "700", color: "#333" },
-  resultScore: { fontSize: 28, fontWeight: "800", marginTop: 8 },
-  resultLabel: { fontSize: 16, color: "#666", marginTop: 4 },
-  resultInfo: {
+  submitBtnDisabled: { opacity: 0.5, shadowOpacity: 0 },
+  submitBtnPressed: { opacity: 0.85 },
+  submitText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+
+  historyHeader: { marginTop: 32, marginBottom: 12 },
+  historyTitle: { fontSize: 16, fontWeight: "700", color: "#333" },
+
+  empty: { alignItems: "center", padding: 24 },
+  emptyEmoji: { fontSize: 36, marginBottom: 8 },
+  emptyText: {
     fontSize: 13,
-    color: "#999",
+    color: "#777",
     textAlign: "center",
-    marginTop: 16,
-    lineHeight: 20,
+    maxWidth: 280,
+    lineHeight: 18,
   },
-  retryButton: {
-    marginTop: 24,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#0288d1",
+
+  historyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 10,
+    gap: 14,
   },
-  retryText: { color: "#0288d1", fontWeight: "600" },
+  historyEmoji: { fontSize: 30 },
+  historyText: { flex: 1, minWidth: 0 },
+  historyLabel: { fontSize: 14, fontWeight: "600", color: "#333" },
+  historyDate: { fontSize: 11, color: "#999", marginTop: 2 },
+  historyNote: {
+    fontSize: 12,
+    color: "#666",
+    marginTop: 6,
+    fontStyle: "italic",
+    lineHeight: 16,
+  },
+  deleteBtn: { padding: 6, borderRadius: 8 },
+  deleteIcon: { fontSize: 18 },
 });

@@ -43,7 +43,10 @@ interface AuthState {
   /** Restaure tokens + user au démarrage de l'app. */
   restore: () => Promise<void>;
 
-  /** Lance le flow Keycloak (Google / Apple / email). */
+  /** Login natif email + password (sans browser). */
+  signInWithEmailPassword: (email: string, password: string) => Promise<void>;
+
+  /** Lance le flow Keycloak hosted UI (Google / Apple / MFA). */
   signIn: () => Promise<void>;
 
   /** Retourne un access token valide, rafraîchit silencieusement si besoin. */
@@ -94,6 +97,28 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
     } catch {
       set({ loading: false });
+    }
+  },
+
+  signInWithEmailPassword: async (email: string, password: string) => {
+    set({ signingIn: true, error: null });
+    try {
+      const result = await kc.signInWithPassword(email.trim(), password);
+      const tokens: PersistedTokens = {
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
+        idToken: result.idToken,
+        expiresAt: result.expiresAt,
+      };
+      await saveTokens(tokens);
+      set({ tokens });
+      await get().refreshUser();
+      set({ signingIn: false });
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Connexion impossible";
+      set({ signingIn: false, error: message });
+      throw err;
     }
   },
 

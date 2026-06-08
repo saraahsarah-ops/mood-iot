@@ -26,6 +26,7 @@ services:
       - ./backend/infrastructure/database/05-doctor-institution-migration.sql:/docker-entrypoint-initdb.d/05-doctor-institution-migration.sql
       - ./backend/infrastructure/database/06-keycloak-migration.sql:/docker-entrypoint-initdb.d/06-keycloak-migration.sql
       - ./backend/infrastructure/database/07-notification-rdv.sql:/docker-entrypoint-initdb.d/07-notification-rdv.sql
+      - ./backend/infrastructure/database/08-humeur-entries.sql:/docker-entrypoint-initdb.d/08-humeur-entries.sql
     networks:
       - mood-iot-network
     healthcheck:

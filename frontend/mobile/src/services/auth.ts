@@ -193,3 +193,58 @@ export function isExpired(tokens: KeycloakTokens | null): boolean {
   if (!tokens) return true;
   return Date.now() >= tokens.expiresAt;
 }
+
+/**
+ * Login natif email+password (Resource Owner Password Grant).
+ *
+ * Pas de redirection navigateur — l'app POSTe directement les identifiants
+ * vers Keycloak. À utiliser pour le flow "compte standard". Pour Google /
+ * Apple / MFA, on conserve `signInWithKeycloak` (PKCE + hosted UI).
+ *
+ * Lève une erreur avec un message en français en cas d'échec.
+ */
+export async function signInWithPassword(
+  email: string,
+  password: string,
+): Promise<KeycloakTokens> {
+  const resp = await fetch(TOKEN_ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "password",
+      client_id: CLIENT_ID,
+      username: email,
+      password,
+      scope: "openid profile email",
+    }).toString(),
+  });
+
+  if (!resp.ok) {
+    let detail = "";
+    try {
+      const body = await resp.json();
+      detail = body.error_description || body.error || "";
+    } catch {
+      /* ignore */
+    }
+
+    // Messages d'erreur en français selon le code Keycloak
+    if (resp.status === 401 || detail.includes("Invalid user credentials")) {
+      throw new Error("Email ou mot de passe incorrect.");
+    }
+    if (detail.includes("Account is not fully set up")) {
+      throw new Error(
+        "Votre compte n'est pas finalisé. Vérifiez votre email ou contactez le support.",
+      );
+    }
+    if (detail.includes("disabled")) {
+      throw new Error("Votre compte est désactivé. Contactez le support.");
+    }
+    throw new Error(
+      `Connexion impossible (HTTP ${resp.status})${detail ? " : " + detail : ""}`,
+    );
+  }
+
+  const data: TokenResponse = await resp.json();
+  return toKeycloakTokens(data);
+}

@@ -34,6 +34,8 @@ from src.shared.models import (
     RiskScore,
     Notification,
     NotificationPreference,
+    HumeurEntry,
+    HumeurSource,
     Message,
     TeleconsultSession,
     User,
@@ -1626,6 +1628,154 @@ async def list_my_appointments(
         )
         for (s, d) in rows
     ]
+
+
+# ===========================================================================
+# Humeur — saisies emoji simples (Phase 2.5)
+# ===========================================================================
+
+
+class HumeurEmojiSubmit(BaseModel):
+    """1=Très mal, 7=Excellent. Note libre optionnelle (max 500 caractères)."""
+
+    emoji_level: int = Field(..., ge=1, le=7)
+    note: Optional[str] = Field(None, max_length=500)
+
+
+class HumeurEntryResponse(BaseModel):
+    id: str
+    source: str  # "emoji" | "voix"
+    emoji_level: Optional[int]
+    note: Optional[str]
+    created_at: str
+
+
+def _serialize_humeur(h: HumeurEntry) -> HumeurEntryResponse:
+    return HumeurEntryResponse(
+        id=str(h.id),
+        source=h.source.value if h.source else "emoji",
+        emoji_level=h.emoji_level,
+        note=h.note,
+        created_at=h.created_at.isoformat() if h.created_at else "",
+    )
+
+
+async def _get_my_patient(
+    db: AsyncSession, user_id: str
+) -> Patient:
+    """Récupère le profil Patient lié à l'utilisateur connecté, sinon 404."""
+    res = await db.execute(select(Patient).where(Patient.user_id == user_id))
+    patient = res.scalar_one_or_none()
+    if patient is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profil patient introuvable",
+        )
+    return patient
+
+
+@app.post(
+    "/patients/me/humeur/emoji",
+    response_model=HumeurEntryResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def submit_humeur_emoji(
+    payload: HumeurEmojiSubmit,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Saisie d'humeur par emoji (1-7 + note optionnelle)."""
+    patient = await _get_my_patient(db, current_user["user_id"])
+    entry = HumeurEntry(
+        patient_id=patient.id,
+        source=HumeurSource.emoji,
+        emoji_level=payload.emoji_level,
+        note=payload.note,
+    )
+    db.add(entry)
+    await db.flush()
+    await log_action(
+        db,
+        user_id=current_user["user_id"],
+        action="humeur_emoji_submit",
+        resource="humeur_entry",
+        resource_id=str(entry.id),
+        details={"emoji_level": payload.emoji_level},
+    )
+    await db.commit()
+    return _serialize_humeur(entry)
+
+
+@app.get("/patients/me/humeur", response_model=list[HumeurEntryResponse])
+async def list_my_humeur(
+    limit: int = Query(30, ge=1, le=200),
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Historique des saisies humeur de l'utilisateur connecté."""
+    patient = await _get_my_patient(db, current_user["user_id"])
+    res = await db.execute(
+        select(HumeurEntry)
+        .where(HumeurEntry.patient_id == patient.id)
+        .order_by(HumeurEntry.created_at.desc())
+        .limit(limit)
+    )
+    return [_serialize_humeur(h) for h in res.scalars().all()]
+
+
+@app.patch(
+    "/patients/me/humeur/latest",
+    response_model=HumeurEntryResponse,
+)
+async def edit_my_latest_humeur(
+    payload: HumeurEmojiSubmit,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Édite la DERNIÈRE saisie humeur du patient (les précédentes sont immuables)."""
+    patient = await _get_my_patient(db, current_user["user_id"])
+    res = await db.execute(
+        select(HumeurEntry)
+        .where(HumeurEntry.patient_id == patient.id)
+        .order_by(HumeurEntry.created_at.desc())
+        .limit(1)
+    )
+    entry = res.scalar_one_or_none()
+    if entry is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Aucune saisie d'humeur à modifier",
+        )
+    entry.emoji_level = payload.emoji_level
+    entry.note = payload.note
+    await db.commit()
+    return _serialize_humeur(entry)
+
+
+@app.delete(
+    "/patients/me/humeur/latest",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_my_latest_humeur(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Supprime la DERNIÈRE saisie humeur (un changement d'avis du même jour)."""
+    patient = await _get_my_patient(db, current_user["user_id"])
+    res = await db.execute(
+        select(HumeurEntry)
+        .where(HumeurEntry.patient_id == patient.id)
+        .order_by(HumeurEntry.created_at.desc())
+        .limit(1)
+    )
+    entry = res.scalar_one_or_none()
+    if entry is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Aucune saisie d'humeur à supprimer",
+        )
+    await db.delete(entry)
+    await db.commit()
 
 
 # ---------------------------------------------------------------------------

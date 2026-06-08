@@ -946,6 +946,49 @@ class NotificationPreference(Base):
     user: Mapped["User"] = relationship(foreign_keys=[user_id])
 
 
+class HumeurSource(str, enum.Enum):
+    """Source d'une saisie humeur — emoji ou voix (Phase 2.5)."""
+    emoji = "emoji"
+    voix = "voix"
+
+
+class HumeurEntry(Base):
+    """Saisie d'humeur (emoji + note + voix optionnelle)."""
+
+    __tablename__ = "humeur_entries"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    patient_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("patients.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source: Mapped[HumeurSource] = mapped_column(
+        PgEnum(HumeurSource, name="humeur_source", create_type=False),
+        default=HumeurSource.emoji,
+        nullable=False,
+    )
+    # 1 = Très mal ... 7 = Excellent
+    emoji_level: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Champs voix (réservés pour Phase 2.5 phase 2)
+    audio_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    transcription: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    humeur_globale: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    intensite: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
+    emotions_detectees: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    mots_cles: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    resume: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class RdvReminderLog(Base):
     """Trace des rappels RDV émis (idempotence du scheduler)."""
 

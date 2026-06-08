@@ -167,6 +167,50 @@ export async function submitPhq9(
   });
 }
 
+/* ── Humeur (emoji) ────────────────────────────── */
+
+export interface HumeurEntry {
+  id: string;
+  source: "emoji" | "voix";
+  emoji_level: number | null;
+  note: string | null;
+  created_at: string;
+}
+
+export async function submitHumeurEmoji(
+  emojiLevel: number,
+  note?: string,
+): Promise<HumeurEntry> {
+  return request<HumeurEntry>("/patients/me/humeur/emoji", {
+    method: "POST",
+    body: JSON.stringify({
+      emoji_level: emojiLevel,
+      note: note?.trim() || null,
+    }),
+  });
+}
+
+export async function fetchHumeurHistory(limit = 30): Promise<HumeurEntry[]> {
+  return request<HumeurEntry[]>(`/patients/me/humeur?limit=${limit}`);
+}
+
+export async function patchLatestHumeur(
+  emojiLevel: number,
+  note?: string,
+): Promise<HumeurEntry> {
+  return request<HumeurEntry>("/patients/me/humeur/latest", {
+    method: "PATCH",
+    body: JSON.stringify({
+      emoji_level: emojiLevel,
+      note: note?.trim() || null,
+    }),
+  });
+}
+
+export async function deleteLatestHumeur(): Promise<void> {
+  await request<void>("/patients/me/humeur/latest", { method: "DELETE" });
+}
+
 /* ── Messagerie médecin → patient ─────────────── */
 
 export interface MessageItem {
