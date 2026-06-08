@@ -96,10 +96,21 @@ export const useHealthStore = create<HealthState>((set) => ({
   },
 
   syncHealthData: async () => {
-    const pid = getPatientId();
-    if (!pid) return;
-    const payloads = await healthSync.readLastNDays(7);
-    await api.syncHealthDataBatch(pid, payloads);
+    // Sync /me/ : pas besoin de patient_id côté client, le backend résout via JWT.
+    // Filtre les jours sans aucune métrique non-nulle pour éviter de polluer la BDD.
+    const payloads = (await healthSync.readLastNDays(7)).filter((p) =>
+      p.step_count != null ||
+      p.heart_rate_avg != null ||
+      p.heart_rate_variability != null ||
+      p.sleep_duration_min != null,
+    );
+    if (payloads.length === 0) {
+      throw new Error(
+        "Aucune donnée à synchroniser. Vérifiez vos autorisations Health Connect.",
+      );
+    }
+    await api.syncHealthDataBatch(payloads);
+    await healthSync.setLastSyncAt();
   },
 
   submitPhq9: async (answers) => {

@@ -128,31 +128,43 @@ export interface HealthDataPayload {
   heart_rate_avg: number | null;
   heart_rate_variability: number | null;
   sleep_duration_min: number | null;
-  steps: number | null;
+  step_count: number | null;
   screen_time_min: number | null;
   call_count: number | null;
   gps_radius_km: number | null;
   source_platform: "android_health_connect" | "ios_healthkit";
 }
 
-export async function syncHealthData(
-  patientId: string,
-  data: HealthDataPayload,
-): Promise<void> {
-  await request(`/patients/${patientId}/health-data`, {
+/**
+ * Envoie 1 jour de données pour le patient connecté.
+ * Endpoint `/me/` → pas d'IDOR : le backend résout le patient depuis le JWT.
+ */
+export async function syncHealthData(data: HealthDataPayload): Promise<void> {
+  await request("/patients/me/health-data", {
     method: "POST",
     body: JSON.stringify(data),
   });
 }
 
+/** Batch sync (max 90 jours) pour le patient connecté. */
 export async function syncHealthDataBatch(
-  patientId: string,
   data: HealthDataPayload[],
 ): Promise<void> {
-  await request(`/patients/${patientId}/health-data/batch`, {
+  await request("/patients/me/health-data/batch", {
     method: "POST",
     body: JSON.stringify(data),
   });
+}
+
+export interface HealthSyncStatus {
+  last_sync_at: string | null;
+  last_date_synced: string | null;
+  source_platform: string | null;
+  days_synced_last_30: number;
+}
+
+export async function fetchHealthSyncStatus(): Promise<HealthSyncStatus> {
+  return request<HealthSyncStatus>("/patients/me/health-data/status");
 }
 
 /* ── PHQ-9 (questionnaire clinique — conservé tel quel) ──────────── */
