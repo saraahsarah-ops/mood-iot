@@ -1,7 +1,8 @@
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useAuthStore } from "@/stores/authStore";
+import { hasSeenOnboarding } from "./(auth)/onboarding";
 
 export default function RootLayout() {
   const tokens = useAuthStore((s) => s.tokens);
@@ -10,20 +11,33 @@ export default function RootLayout() {
   const restore = useAuthStore((s) => s.restore);
   const router = useRouter();
   const segments = useSegments();
+  const [onboardingChecked, setOnboardingChecked] = useState(false);
+  const [onboardingSeen, setOnboardingSeen] = useState(false);
 
   // Bootstrap : restaure session au démarrage de l'app
   useEffect(() => {
     void restore();
+    void hasSeenOnboarding().then((seen) => {
+      setOnboardingSeen(seen);
+      setOnboardingChecked(true);
+    });
   }, [restore]);
 
   useEffect(() => {
-    if (loading) return;
+    if (loading || !onboardingChecked) return;
     const segs: string[] = segments as unknown as string[];
     const inAuth = segs[0] === "(auth)";
     const atWelcome = segs[0] === "(auth)" && segs[1] === "welcome";
+    const atOnboarding = segs[0] === "(auth)" && segs[1] === "onboarding";
+
+    // Onboarding : premier lancement, jamais connecté
+    if (!tokens && !onboardingSeen && !atOnboarding) {
+      router.replace("/(auth)/onboarding");
+      return;
+    }
 
     if (!tokens) {
-      // Non connecté → écran de login
+      // Non connecté → écran de login (sauf si déjà sur onboarding)
       if (!inAuth || atWelcome) {
         router.replace("/(auth)/login");
       }
@@ -36,7 +50,7 @@ export default function RootLayout() {
       // Connecté + profil → app principale
       router.replace("/(tabs)");
     }
-  }, [tokens, user, loading, segments, router]);
+  }, [tokens, user, loading, segments, router, onboardingChecked, onboardingSeen]);
 
   return (
     <>

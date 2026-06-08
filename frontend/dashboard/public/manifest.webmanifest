@@ -1,0 +1,30 @@
+{
+  "name": "Mood-IoT — Tableau de bord médecin",
+  "short_name": "Mood-IoT",
+  "description": "Suivi du bien-être et prévention des rechutes dépressives. Données chiffrées hébergées en France.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f0f7ff",
+  "theme_color": "#0288d1",
+  "lang": "fr",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}

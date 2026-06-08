@@ -26,6 +26,29 @@ const PUBLIC_ROUTES_PREFIX = ["/privacy", "/about"];
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="fr">
+      <head>
+        <title>Mood-IoT — Suivi du bien-être</title>
+        <meta charSet="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta
+          name="description"
+          content="Plateforme française de suivi du bien-être. Tableau de bord médecin pour la téléconsultation et la prévention des rechutes dépressives."
+        />
+        <meta name="theme-color" content="#0288d1" />
+        <meta name="application-name" content="Mood-IoT" />
+        <link rel="icon" href="/favicon.ico" sizes="any" />
+        <link rel="icon" href="/icon-192.png" type="image/png" sizes="192x192" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <link rel="manifest" href="/manifest.webmanifest" />
+        {/* Open Graph (partage sur Slack / Discord / réseaux) */}
+        <meta property="og:title" content="Mood-IoT — Tableau de bord médecin" />
+        <meta
+          property="og:description"
+          content="Détection précoce des rechutes dépressives et téléconsultation sécurisée. Données chiffrées hébergées en France."
+        />
+        <meta property="og:type" content="website" />
+        <meta property="og:image" content="/icon-512.png" />
+      </head>
       <body>
         <SessionProvider>
           <ToastContainer position="top-right" autoClose={3000} hideProgressBar newestOnTop theme="light" />

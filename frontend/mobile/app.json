@@ -4,22 +4,25 @@
     "slug": "mood-iot-patient",
     "version": "1.0.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "light",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
     "scheme": "mood-iot",
     "splash": {
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0288d1"
+      "backgroundColor": "#f0f7ff"
     },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.moodiot.patient",
       "infoPlist": {
-        "NSHealthShareUsageDescription": "Mood-IoT utilise HealthKit pour suivre votre bien-etre.",
-        "NSHealthUpdateUsageDescription": "Mood-IoT enregistre vos donnees de sante."
+        "NSHealthShareUsageDescription": "Mood-IoT utilise HealthKit pour suivre votre bien-être (rythme cardiaque, pas, sommeil, oxygène). Vous pouvez révoquer cet accès à tout moment depuis Réglages.",
+        "NSHealthUpdateUsageDescription": "Mood-IoT enregistre vos données de bien-être de manière chiffrée et hébergée en France."
       }
     },
     "android": {
       "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0288d1"
       },
       "package": "com.moodiot.patient",
