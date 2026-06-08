@@ -1,41 +1,83 @@
 # ============================================================================
-# Mood-IoT : Dockerfile multi-service (FastAPI)
-# Utilisé par tous les microservices via l'argument SERVICE_NAME
+# Mood-IoT — Dockerfile multi-stage, multi-service
+#
+# Build:
+#   docker build \
+#     --build-arg SERVICE_NAME=patient \
+#     -t mood-iot/patient:latest \
+#     -f backend/infrastructure/docker/Dockerfile backend/
+#
+# Run (exemple) :
+#   docker run --rm -p 8002:8000 \
+#     -e DATABASE_URL=... -e KEYCLOAK_ISSUER=... \
+#     mood-iot/patient:latest
+#
+# Conçu pour OVH Managed Kubernetes HDS (Healthcare Hosted Service) :
+#   - User non-root (uid 1001) → respect des PodSecurityPolicy
+#   - Healthcheck HTTP → readinessProbe Kubernetes
+#   - Logs JSON sur stdout (structlog côté app)
+#   - Pas de fichiers .pyc générés (PYTHONDONTWRITEBYTECODE)
 # ============================================================================
 
-FROM python:3.11-slim AS base
+# ── Stage 1 : builder ───────────────────────────────────────────────────────
+FROM python:3.11-slim AS builder
 
-# Empêcher la création de fichiers .pyc et activer les logs non-bufferisés
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /build
+
+# Build deps (purgés ensuite via le stage runtime)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        gcc \
+        libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --prefix=/install --no-cache-dir -r requirements.txt
+
+
+# ── Stage 2 : runtime ───────────────────────────────────────────────────────
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/install/bin:$PATH" \
+    PYTHONPATH="/install/lib/python3.11/site-packages"
 
 WORKDIR /app
 
-# Dépendances système
+# Runtime deps : curl pour le healthcheck, libpq5 pour asyncpg
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+        curl \
+        libpq5 \
+    && rm -rf /var/lib/apt/lists/* \
+    # User non-root (UID > 1000 = compat OVH HDS PSP)
+    && groupadd --system --gid 1001 mood \
+    && useradd  --system --uid 1001 --gid mood --no-create-home --shell /bin/false mood
 
-# Dépendances Python
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copie des dépendances compilées
+COPY --from=builder /install /install
 
-# Code source
-COPY src/ ./src/
+# Code applicatif + modèle ML
+COPY --chown=mood:mood src/    ./src/
+COPY --chown=mood:mood models/ ./models/
 
-# Modele ML (XGBoost) si disponible
-COPY models/ ./models/
-
-# Argument pour sélectionner le microservice
+# Service à lancer (override via --build-arg ou docker-compose)
 ARG SERVICE_NAME=gateway
-ENV SERVICE_NAME=${SERVICE_NAME}
+ENV SERVICE_NAME=${SERVICE_NAME} \
+    SERVICE_PORT=8000
 
-# Port par défaut (surchargé par SERVICE_PORT dans docker-compose)
 EXPOSE 8000
 
-# Lancement du service approprié
-CMD uvicorn src.${SERVICE_NAME}.main:app \
-    --host 0.0.0.0 \
-    --port ${SERVICE_PORT:-8000} \
-    --reload \
-    --log-level ${LOG_LEVEL:-info}
+# Healthcheck — chaque service expose GET /health (200 = OK)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS "http://localhost:${SERVICE_PORT}/health" || exit 1
+
+USER mood
+
+# Pas de --reload en prod (consomme CPU + ne lit pas les volumes en K8s)
+CMD ["sh", "-c", "uvicorn src.${SERVICE_NAME}.main:app --host 0.0.0.0 --port ${SERVICE_PORT} --log-level ${LOG_LEVEL:-info} --proxy-headers --forwarded-allow-ips='*'"]
