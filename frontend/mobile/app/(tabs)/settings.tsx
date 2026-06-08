@@ -1,5 +1,6 @@
 import { View, Text, TouchableOpacity, StyleSheet, Alert, Switch } from "react-native";
 import { useState } from "react";
+import { router } from "expo-router";
 import { useAuthStore } from "@/stores/authStore";
 import { useHealthStore } from "@/stores/healthStore";
 
@@ -7,7 +8,6 @@ export default function SettingsScreen() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.signOut);
   const syncNow = useHealthStore((s) => s.syncHealthData);
-  const [notifEnabled, setNotifEnabled] = useState(true);
   const [autoSync, setAutoSync] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
@@ -71,17 +71,23 @@ export default function SettingsScreen() {
       {/* Notifications */}
       <Text style={styles.sectionTitle}>Notifications</Text>
       <View style={styles.card}>
-        <SettingRow
-          emoji="🔔"
-          label="Notifications push"
-          right={
-            <Switch
-              value={notifEnabled}
-              onValueChange={setNotifEnabled}
-              trackColor={{ true: "#0288d1" }}
-            />
-          }
-        />
+        <TouchableOpacity
+          style={styles.settingRow}
+          onPress={() => router.push("/(tabs)/notifications-settings")}
+          accessibilityRole="button"
+          accessibilityLabel="Gérer mes notifications"
+        >
+          <View style={styles.settingLeft}>
+            <Text style={{ fontSize: 18 }}>🔔</Text>
+            <View>
+              <Text style={styles.settingLabel}>Gérer mes notifications</Text>
+              <Text style={styles.settingSubLabel}>
+                Push, SMS, email & rappels RDV
+              </Text>
+            </View>
+          </View>
+          <Text style={styles.chevron}>›</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Info */}
@@ -169,6 +175,8 @@ const styles = StyleSheet.create({
   },
   settingLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
   settingLabel: { fontSize: 15, color: "#444" },
+  settingSubLabel: { fontSize: 12, color: "#888", marginTop: 2 },
+  chevron: { fontSize: 24, color: "#bbb", fontWeight: "300" },
   infoText: { fontSize: 13, color: "#999" },
   syncButton: {
     backgroundColor: "#e3f2fd",

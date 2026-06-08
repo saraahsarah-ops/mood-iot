@@ -167,6 +167,60 @@ export async function submitPhq9(
   });
 }
 
+/* ── Consentements RGPD / CGU ──────────────────── */
+
+export interface MyConsents {
+  accepted_at: string | null;
+  cgu: boolean;
+  rgpd: boolean;
+  health_sensors: boolean;
+  ai_recommendations: boolean;
+}
+
+export async function fetchMyConsents(): Promise<MyConsents> {
+  return request<MyConsents>("/patients/me/consents");
+}
+
+export async function updateMyConsents(
+  consents: Omit<MyConsents, "accepted_at">,
+): Promise<MyConsents> {
+  return request<MyConsents>("/patients/me/consents", {
+    method: "PUT",
+    body: JSON.stringify(consents),
+  });
+}
+
+/* ── Préférences notification ──────────────────── */
+
+export interface NotificationPreferences {
+  push_enabled: boolean;
+  sms_enabled: boolean;
+  email_enabled: boolean;
+  rdv_reminder_24h: boolean;
+  rdv_reminder_1h: boolean;
+  rdv_reminder_now: boolean;
+  push_token: string | null;
+  phone_e164: string | null;
+}
+
+export async function fetchNotificationPreferences(): Promise<NotificationPreferences> {
+  return request<NotificationPreferences>(
+    "/patients/me/notification-preferences",
+  );
+}
+
+export async function updateNotificationPreferences(
+  patch: Partial<NotificationPreferences>,
+): Promise<NotificationPreferences> {
+  return request<NotificationPreferences>(
+    "/patients/me/notification-preferences",
+    {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    },
+  );
+}
+
 /* ── Humeur (emoji) ────────────────────────────── */
 
 export interface HumeurEntry {

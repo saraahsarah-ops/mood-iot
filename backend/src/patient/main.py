@@ -639,6 +639,125 @@ _CONSENT_FIELD_MAP = {
 }
 
 
+# ===========================================================================
+# Consentements — wrapper "moi" (Phase 2.7)
+#
+# DOIT être déclaré AVANT `/patients/{patient_id}/consents` car FastAPI
+# matche les routes dans l'ordre de déclaration et `me` capturerait
+# `{patient_id}`.
+# ===========================================================================
+
+
+class MyConsentsResponse(BaseModel):
+    accepted_at: Optional[str]
+    cgu: bool
+    rgpd: bool
+    health_sensors: bool
+    ai_recommendations: bool
+
+
+class MyConsentsUpdate(BaseModel):
+    cgu: bool
+    rgpd: bool
+    health_sensors: bool = False
+    ai_recommendations: bool = False
+
+
+def _my_consents_to_response(items: list[Consent]) -> "MyConsentsResponse":
+    by_type: dict[ConsentType, bool] = {}
+    last_at: Optional[datetime] = None
+    for c in items:
+        by_type[c.consent_type] = bool(c.is_granted)
+        if c.granted_at and (last_at is None or c.granted_at > last_at):
+            last_at = c.granted_at
+    return MyConsentsResponse(
+        accepted_at=last_at.isoformat() if last_at else None,
+        cgu=by_type.get(ConsentType.data_sharing, False),
+        rgpd=by_type.get(ConsentType.data_collection, False),
+        health_sensors=by_type.get(ConsentType.notifications, False),
+        ai_recommendations=by_type.get(ConsentType.research, False),
+    )
+
+
+async def _get_my_patient_simple(
+    db: AsyncSession, user_id: str
+) -> Patient:
+    res = await db.execute(select(Patient).where(Patient.user_id == user_id))
+    patient = res.scalar_one_or_none()
+    if patient is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profil patient introuvable",
+        )
+    return patient
+
+
+@app.get("/patients/me/consents", response_model=MyConsentsResponse)
+async def my_consents(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Renvoie les consentements de l'utilisateur connecté (vide si jamais donnés)."""
+    patient = await _get_my_patient_simple(db, current_user["user_id"])
+    res = await db.execute(select(Consent).where(Consent.patient_id == patient.id))
+    return _my_consents_to_response(list(res.scalars().all()))
+
+
+@app.put("/patients/me/consents", response_model=MyConsentsResponse)
+async def update_my_consents(
+    payload: MyConsentsUpdate,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Met à jour les 4 consentements de l'utilisateur connecté en une fois."""
+    patient = await _get_my_patient_simple(db, current_user["user_id"])
+    now = datetime.now(timezone.utc)
+    mapping: list[tuple[ConsentType, bool]] = [
+        (ConsentType.data_sharing, payload.cgu),
+        (ConsentType.data_collection, payload.rgpd),
+        (ConsentType.notifications, payload.health_sensors),
+        (ConsentType.research, payload.ai_recommendations),
+    ]
+    for consent_type, granted in mapping:
+        res = await db.execute(
+            select(Consent).where(
+                and_(
+                    Consent.patient_id == patient.id,
+                    Consent.consent_type == consent_type,
+                )
+            )
+        )
+        existing = res.scalar_one_or_none()
+        if existing:
+            existing.is_granted = granted
+            if granted:
+                existing.granted_at = now
+                existing.revoked_at = None
+            else:
+                existing.revoked_at = now
+        else:
+            db.add(
+                Consent(
+                    patient_id=patient.id,
+                    consent_type=consent_type,
+                    is_granted=granted,
+                    granted_at=now if granted else None,
+                    revoked_at=None if granted else now,
+                )
+            )
+    await log_action(
+        db,
+        user_id=current_user["user_id"],
+        action="my_consents_update",
+        resource="consent",
+        resource_id=str(patient.id),
+        details=payload.model_dump(),
+    )
+    await db.commit()
+    res = await db.execute(select(Consent).where(Consent.patient_id == patient.id))
+    return _my_consents_to_response(list(res.scalars().all()))
+
+
 @app.get("/patients/{patient_id}/consents", response_model=ConsentResponse)
 async def get_consents(
     patient_id: str,
