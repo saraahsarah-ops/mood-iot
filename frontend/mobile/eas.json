@@ -21,6 +21,11 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "http://192.168.1.218:8010/api/v1",
+        "EXPO_PUBLIC_KEYCLOAK_DISCOVERY": "http://192.168.1.218:8080/realms/moodiot/.well-known/openid-configuration",
+        "EXPO_PUBLIC_KEYCLOAK_CLIENT_ID": "mobile-app"
       }
     },
     "production": {
