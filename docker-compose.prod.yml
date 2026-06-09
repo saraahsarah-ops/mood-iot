@@ -1,0 +1,172 @@
+# ============================================================================
+# Mood-IoT — Docker Compose PRODUCTION (Oracle Cloud / Hetzner VPS / OVH HDS)
+#
+# Usage :
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+#
+# Reverse proxy : Caddy (auto-TLS Let's Encrypt sur api.mood-iot.fr + auth.mood-iot.fr)
+# Pas de volumes mountés sur ./src/ → les images sont auto-suffisantes
+# Pas de --reload uvicorn → CMD prod du Dockerfile
+# ============================================================================
+
+x-restart-policy: &restart unless-stopped
+
+x-backend-base: &backend-base
+  restart: *restart
+  env_file: .env.prod
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  # ── Caddy reverse proxy ── auto-TLS Let's Encrypt ───────────────────────
+  caddy:
+    image: caddy:2-alpine
+    restart: *restart
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infrastructure/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - gateway-service
+      - keycloak
+
+  # ── Postgres ────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    restart: *restart
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # NB : exposition en interne uniquement, pas de port mappé sur l'hôte
+
+  # ── Redis ───────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: *restart
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── Keycloak ────────────────────────────────────────────────────────────
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    restart: *restart
+    command: start
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}?currentSchema=keycloak
+      KC_DB_USERNAME: ${POSTGRES_USER}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME}
+      KC_HOSTNAME_STRICT: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "false"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200 OK'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── Microservices FastAPI ───────────────────────────────────────────────
+  gateway-service:
+    <<: *backend-base
+    image: ${REGISTRY:-mood-iot}/gateway:${TAG:-latest}
+    build:
+      context: ./backend
+      dockerfile: infrastructure/docker/Dockerfile
+      args:
+        SERVICE_NAME: gateway
+
+  auth-service:
+    <<: *backend-base
+    image: ${REGISTRY:-mood-iot}/auth:${TAG:-latest}
+    build:
+      context: ./backend
+      dockerfile: infrastructure/docker/Dockerfile
+      args:
+        SERVICE_NAME: auth
+
+  patient-service:
+    <<: *backend-base
+    image: ${REGISTRY:-mood-iot}/patient:${TAG:-latest}
+    build:
+      context: ./backend
+      dockerfile: infrastructure/docker/Dockerfile
+      args:
+        SERVICE_NAME: patient
+
+  scoring-service:
+    <<: *backend-base
+    image: ${REGISTRY:-mood-iot}/scoring:${TAG:-latest}
+    build:
+      context: ./backend
+      dockerfile: infrastructure/docker/Dockerfile
+      args:
+        SERVICE_NAME: scoring
+
+  notification-service:
+    <<: *backend-base
+    image: ${REGISTRY:-mood-iot}/notification:${TAG:-latest}
+    build:
+      context: ./backend
+      dockerfile: infrastructure/docker/Dockerfile
+      args:
+        SERVICE_NAME: notification
+
+  teleconsult-service:
+    <<: *backend-base
+    image: ${REGISTRY:-mood-iot}/teleconsult:${TAG:-latest}
+    build:
+      context: ./backend
+      dockerfile: infrastructure/docker/Dockerfile
+      args:
+        SERVICE_NAME: teleconsult
+
+  doctor-service:
+    <<: *backend-base
+    image: ${REGISTRY:-mood-iot}/doctor:${TAG:-latest}
+    build:
+      context: ./backend
+      dockerfile: infrastructure/docker/Dockerfile
+      args:
+        SERVICE_NAME: doctor
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:

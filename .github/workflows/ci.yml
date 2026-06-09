@@ -128,13 +128,16 @@ jobs:
           registry: registry.gra.cloud.ovh.net
           username: ${{ secrets.OVH_REGISTRY_USER }}
           password: ${{ secrets.OVH_REGISTRY_TOKEN }}
-      - name: Build & push ${{ matrix.service }}
+      - name: Set up QEMU (multi-arch build)
+        uses: docker/setup-qemu-action@v3
+      - name: Build & push ${{ matrix.service }} (linux/amd64 + linux/arm64)
         uses: docker/build-push-action@v6
         with:
           context: backend
           file: backend/infrastructure/docker/Dockerfile
           build-args: |
             SERVICE_NAME=${{ matrix.service }}
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             registry.gra.cloud.ovh.net/mood-iot/${{ matrix.service }}:latest

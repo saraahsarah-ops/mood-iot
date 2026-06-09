@@ -1,0 +1,67 @@
+# Caddy reverse proxy — Mood-IoT production
+#
+# - Termine TLS automatiquement via Let's Encrypt (port 80 + 443 ouverts)
+# - Route :
+#     api.mood-iot.fr   → gateway-service:8000
+#     auth.mood-iot.fr  → keycloak:8080
+# - HSTS + X-Frame-Options + Referrer-Policy par défaut
+# - Logs JSON sur stdout (captés par docker logs / Loki en prod)
+#
+# Variables : utilise l'email ACME via la directive `email` plus bas.
+
+{
+    # ACME registration email (Let's Encrypt enverra les notifs d'expiration)
+    email ops@mood-iot.fr
+
+    # Logs JSON
+    log {
+        output stdout
+        format json
+    }
+}
+
+# ── API backend ──────────────────────────────────────────────────────────
+api.mood-iot.fr {
+    encode zstd gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # CORS pour le dashboard sur Vercel + l'app mobile
+        Access-Control-Allow-Origin "https://dashboard.mood-iot.fr"
+        Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        Access-Control-Allow-Headers "Authorization, Content-Type"
+        Access-Control-Max-Age "3600"
+    }
+
+    # Preflight CORS
+    @options method OPTIONS
+    respond @options 204
+
+    reverse_proxy gateway-service:8000 {
+        # Timeouts un peu plus longs pour les uploads voix (humeur vocale)
+        transport http {
+            response_header_timeout 60s
+            read_timeout 120s
+        }
+    }
+}
+
+# ── Keycloak (login UI + JWKS + token endpoint) ──────────────────────────
+auth.mood-iot.fr {
+    encode zstd gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    reverse_proxy keycloak:8080 {
+        # Keycloak a besoin de connaitre le schéma HTTPS d'origine
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-Host {host}
+    }
+}
