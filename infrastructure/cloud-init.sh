@@ -22,10 +22,37 @@
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/CHANGE-ME/mood-iot.git}"
-APP_USER="${APP_USER:-ubuntu}"
+APP_USER="${APP_USER:-}"
 APP_DIR="${APP_DIR:-/opt/mood-iot}"
 
 log() { printf "\033[1;34m[mood-iot]\033[0m %s\n" "$*"; }
+
+# Auto-detect user :
+#   - Oracle Cloud Ubuntu cloud image  → existing "ubuntu" user
+#   - Hetzner Cloud Ubuntu image       → only "root"; we create "mood"
+#   - Any other distro                  → fallback to "mood"
+if [ -z "$APP_USER" ]; then
+    if id -u ubuntu >/dev/null 2>&1; then
+        APP_USER="ubuntu"
+        log "Detected Oracle-style Ubuntu image → using user 'ubuntu'"
+    else
+        APP_USER="mood"
+        if ! id -u mood >/dev/null 2>&1; then
+            log "Creating user 'mood' (Hetzner-style image without default user)"
+            useradd --create-home --shell /bin/bash --groups sudo mood
+            # No password — SSH key only. Copy root's authorized_keys.
+            install -d -m 700 -o mood -g mood /home/mood/.ssh
+            if [ -f /root/.ssh/authorized_keys ]; then
+                cp /root/.ssh/authorized_keys /home/mood/.ssh/authorized_keys
+                chown mood:mood /home/mood/.ssh/authorized_keys
+                chmod 600 /home/mood/.ssh/authorized_keys
+            fi
+            # Passwordless sudo for the app user
+            echo "mood ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/mood
+            chmod 440 /etc/sudoers.d/mood
+        fi
+    fi
+fi
 
 # ── 1. Pré-requis système ───────────────────────────────────────────────────
 log "Mise à jour APT + installation de Docker, git, ufw, fail2ban"
