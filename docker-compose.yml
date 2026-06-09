@@ -64,6 +64,12 @@ services:
       KC_HEALTH_ENABLED: "true"
       KC_HOSTNAME_STRICT: "false"
       KC_HTTP_ENABLED: "true"
+      # ─── Pour exposition publique via Tailscale Funnel / Cloudflare ─────
+      # KC_HOSTNAME_URL : URL canonique publique (ex: https://cinthya.tail62357d.ts.net:8443)
+      #   Laisser vide en dev local pur (Keycloak utilise le Host header).
+      # KC_PROXY_HEADERS : xforwarded → Keycloak relit X-Forwarded-Proto: https du reverse proxy.
+      KC_HOSTNAME: ${KC_HOSTNAME_URL:-}
+      KC_PROXY_HEADERS: ${KC_PROXY_HEADERS:-xforwarded}
       KC_DB: "postgres"
       KC_DB_URL: "jdbc:postgresql://postgres:5432/${POSTGRES_DB:-mood_iot}"
       KC_DB_USERNAME: ${POSTGRES_USER:-mood_user}
