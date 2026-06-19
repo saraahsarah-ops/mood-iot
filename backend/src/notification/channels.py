@@ -189,6 +189,8 @@ class TwilioChannel:
     def __init__(self) -> None:
         self._account_sid = settings.TWILIO_ACCOUNT_SID
         self._auth_token = settings.TWILIO_AUTH_TOKEN
+        self._api_key_sid = settings.TWILIO_API_KEY_SID
+        self._api_key_secret = settings.TWILIO_API_KEY_SECRET
         self._from_phone = settings.TWILIO_FROM_PHONE
         self._client: TwilioClient | None = None
 
@@ -199,8 +201,16 @@ class TwilioChannel:
             return
 
         try:
-            self._client = TwilioClient(self._account_sid, self._auth_token)
-            logger.info("Canal Twilio initialise avec succes")
+            if self._api_key_sid and self._api_key_secret:
+                # API Key (recommandé) : Client(api_key_sid, api_key_secret, account_sid)
+                self._client = TwilioClient(
+                    self._api_key_sid, self._api_key_secret, self._account_sid
+                )
+                logger.info("Canal Twilio initialise (API Key)")
+            else:
+                # Credentials primaires : Client(account_sid, auth_token)
+                self._client = TwilioClient(self._account_sid, self._auth_token)
+                logger.info("Canal Twilio initialise (Auth Token)")
         except Exception as exc:
             logger.error("Impossible d'initialiser le client Twilio : %s", exc)
 

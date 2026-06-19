@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""
+    # API Key Twilio (recommandé : révocable indépendamment des credentials
+    # primaires). Si renseignée, prioritaire sur TWILIO_AUTH_TOKEN.
+    TWILIO_API_KEY_SID: str = ""
+    TWILIO_API_KEY_SECRET: str = ""
     TWILIO_FROM_PHONE: str = ""
     FCM_CREDENTIALS_JSON: str = "{}"
     SES_FROM_EMAIL: str = "noreply@mood-iot.fr"
