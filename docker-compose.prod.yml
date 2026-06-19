@@ -111,9 +111,15 @@ services:
       args:
         SERVICE_NAME: gateway
 
+  # NB : le gateway résout les services par (nom, port) — cf. backend/src/gateway/main.py
+  #   auth-service:8001, patient-service:8002, ml-scoring:8003,
+  #   notification-service:8004, teleconsult-service:8005, doctor-service:8006
+  # → chaque service DOIT exposer le bon SERVICE_PORT et porter le bon nom réseau.
   auth-service:
     <<: *backend-base
     image: ${REGISTRY:-mood-iot}/auth:${TAG:-latest}
+    environment:
+      SERVICE_PORT: 8001
     build:
       context: ./backend
       dockerfile: infrastructure/docker/Dockerfile
@@ -123,15 +129,20 @@ services:
   patient-service:
     <<: *backend-base
     image: ${REGISTRY:-mood-iot}/patient:${TAG:-latest}
+    environment:
+      SERVICE_PORT: 8002
     build:
       context: ./backend
       dockerfile: infrastructure/docker/Dockerfile
       args:
         SERVICE_NAME: patient
 
-  scoring-service:
+  # Le gateway cherche ce service sous le nom réseau "ml-scoring" (pas scoring-service)
+  ml-scoring:
     <<: *backend-base
     image: ${REGISTRY:-mood-iot}/scoring:${TAG:-latest}
+    environment:
+      SERVICE_PORT: 8003
     build:
       context: ./backend
       dockerfile: infrastructure/docker/Dockerfile
@@ -141,6 +152,8 @@ services:
   notification-service:
     <<: *backend-base
     image: ${REGISTRY:-mood-iot}/notification:${TAG:-latest}
+    environment:
+      SERVICE_PORT: 8004
     build:
       context: ./backend
       dockerfile: infrastructure/docker/Dockerfile
@@ -150,6 +163,8 @@ services:
   teleconsult-service:
     <<: *backend-base
     image: ${REGISTRY:-mood-iot}/teleconsult:${TAG:-latest}
+    environment:
+      SERVICE_PORT: 8005
     build:
       context: ./backend
       dockerfile: infrastructure/docker/Dockerfile
@@ -159,6 +174,8 @@ services:
   doctor-service:
     <<: *backend-base
     image: ${REGISTRY:-mood-iot}/doctor:${TAG:-latest}
+    environment:
+      SERVICE_PORT: 8006
     build:
       context: ./backend
       dockerfile: infrastructure/docker/Dockerfile
