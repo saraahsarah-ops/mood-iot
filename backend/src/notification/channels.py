@@ -200,16 +200,28 @@ class TwilioChannel:
             )
             return
 
+        # Data residency : ex. compte Irlande → region=ie1, edge=dublin.
+        client_kwargs: dict[str, str] = {}
+        if settings.TWILIO_REGION:
+            client_kwargs["region"] = settings.TWILIO_REGION
+        if settings.TWILIO_EDGE:
+            client_kwargs["edge"] = settings.TWILIO_EDGE
+
         try:
             if self._api_key_sid and self._api_key_secret:
                 # API Key (recommandé) : Client(api_key_sid, api_key_secret, account_sid)
                 self._client = TwilioClient(
-                    self._api_key_sid, self._api_key_secret, self._account_sid
+                    self._api_key_sid,
+                    self._api_key_secret,
+                    self._account_sid,
+                    **client_kwargs,
                 )
                 logger.info("Canal Twilio initialise (API Key)")
             else:
                 # Credentials primaires : Client(account_sid, auth_token)
-                self._client = TwilioClient(self._account_sid, self._auth_token)
+                self._client = TwilioClient(
+                    self._account_sid, self._auth_token, **client_kwargs
+                )
                 logger.info("Canal Twilio initialise (Auth Token)")
         except Exception as exc:
             logger.error("Impossible d'initialiser le client Twilio : %s", exc)

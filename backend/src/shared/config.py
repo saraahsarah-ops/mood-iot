@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     TWILIO_API_KEY_SID: str = ""
     TWILIO_API_KEY_SECRET: str = ""
     TWILIO_FROM_PHONE: str = ""
+    # Data residency (ex. compte Irlande : region=ie1, edge=dublin).
+    # Laisser vide pour les comptes globaux (US1).
+    TWILIO_REGION: str = ""
+    TWILIO_EDGE: str = ""
     FCM_CREDENTIALS_JSON: str = "{}"
     SES_FROM_EMAIL: str = "noreply@mood-iot.fr"
     RESEND_API_KEY: str = ""
