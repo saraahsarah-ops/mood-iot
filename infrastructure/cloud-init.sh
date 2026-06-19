@@ -108,16 +108,45 @@ if [ ! -f /swapfile ]; then
     echo '/swapfile none swap sw 0 0' | tee -a /etc/fstab >/dev/null
 fi
 
-# ── 7. Clonage du repo ──────────────────────────────────────────────────────
-if [ ! -d "$APP_DIR" ]; then
-    log "Clonage du repo ($REPO_BRANCH) dans $APP_DIR"
-    install -d -o "$APP_USER" -g "$APP_USER" "$APP_DIR"
-    sudo -u "$APP_USER" git clone --branch "$REPO_BRANCH" "$REPO_URL" "$APP_DIR"
+# ── 7. Clonage du repo (best-effort) ────────────────────────────────────────
+# Repo PRIVÉ → le clone échoue ici sans credentials. C'est attendu : on prépare
+# le système, puis l'opérateur configure une Deploy Key SSH et clone à la main
+# (cf. instructions en fin de script). On ne bloque jamais le bootstrap système.
+install -d -o "$APP_USER" -g "$APP_USER" "$APP_DIR"
+if [ ! -d "$APP_DIR/.git" ]; then
+    log "Tentative de clone ($REPO_BRANCH) — peut échouer si repo privé"
+    sudo -u "$APP_USER" git clone --branch "$REPO_BRANCH" "$REPO_URL" "$APP_DIR" \
+        || log "Clone impossible (repo privé) → configurez une Deploy Key (voir fin)"
 else
     log "Repo déjà présent, git pull ($REPO_BRANCH)"
     sudo -u "$APP_USER" git -C "$APP_DIR" fetch origin "$REPO_BRANCH" || true
     sudo -u "$APP_USER" git -C "$APP_DIR" checkout "$REPO_BRANCH" || true
     sudo -u "$APP_USER" git -C "$APP_DIR" pull --ff-only origin "$REPO_BRANCH" || true
+fi
+
+# Si le clone a échoué (repo privé), on s'arrête après l'install système.
+if [ ! -f "$APP_DIR/docker-compose.prod.yml" ]; then
+    GEN_KEY="/home/$APP_USER/.ssh/mood_deploy"
+    if [ ! -f "$GEN_KEY" ]; then
+        sudo -u "$APP_USER" ssh-keygen -t ed25519 -N "" -C "mood-iot-deploy" -f "$GEN_KEY"
+    fi
+    log "═══════════════════════════════════════════════════════════════════"
+    log "SYSTÈME PRÊT — repo non cloné (privé). Étapes Deploy Key :"
+    log ""
+    log "  1) Copiez cette clé publique (Deploy Key) :"
+    log ""
+    cat "$GEN_KEY.pub"
+    log ""
+    log "  2) GitHub → repo → Settings → Deploy keys → Add deploy key"
+    log "     (lecture seule, collez la clé ci-dessus)"
+    log ""
+    log "  3) SSH au serveur puis :"
+    log "       export GIT_SSH_COMMAND='ssh -i ~/.ssh/mood_deploy -o StrictHostKeyChecking=no'"
+    log "       git clone --branch $REPO_BRANCH git@github.com:OWNER/REPO.git $APP_DIR"
+    log "       cd $APP_DIR && cp .env.example .env.prod && nano .env.prod"
+    log "       sudo systemctl start mood-iot"
+    log "═══════════════════════════════════════════════════════════════════"
+    exit 0
 fi
 
 # ── 8. .env.prod template (l'utilisateur le complète avant le 1er up) ──────
