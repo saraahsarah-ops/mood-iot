@@ -12,8 +12,14 @@ from .config import settings
 _async_url = settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
 _async_url = _async_url.split("?sslmode=")[0] if "?sslmode=" in _async_url else _async_url
 
-# Detecter si on est en cloud (Supabase, etc.) pour activer SSL
-_is_cloud = "supabase" in settings.DATABASE_URL or settings.ENVIRONMENT == "production"
+# SSL activé uniquement si la BD est externe (cloud managé qui l'exige).
+# Un Postgres interne (même réseau Docker / localhost) n'a pas de SSL et le
+# rejette → ne JAMAIS forcer SSL par le simple fait d'être en "production".
+_INTERNAL_DB_HOSTS = ("@postgres:", "@localhost:", "@127.0.0.1:", "@db:")
+_db_is_internal = any(h in settings.DATABASE_URL for h in _INTERNAL_DB_HOSTS)
+_is_cloud = "supabase" in settings.DATABASE_URL or (
+    settings.ENVIRONMENT == "production" and not _db_is_internal
+)
 
 _engine_kwargs: dict = {"echo": settings.LOG_LEVEL == "DEBUG"}
 if _is_cloud:
