@@ -77,7 +77,8 @@ services:
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
     restart: *restart
-    command: start
+    # --import-realm : importe le realm 'moodiot' au boot s'il n'existe pas encore
+    command: start --import-realm
     environment:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}?currentSchema=keycloak
@@ -91,6 +92,8 @@ services:
       KC_METRICS_ENABLED: "false"
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+    volumes:
+      - ./infrastructure/keycloak/realm-moodiot.json:/opt/keycloak/data/import/realm-moodiot.json:ro
     depends_on:
       postgres:
         condition: service_healthy
