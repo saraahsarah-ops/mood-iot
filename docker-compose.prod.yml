@@ -52,7 +52,15 @@ services:
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/migrations:/docker-entrypoint-initdb.d:ro
+      # Migrations exécutées au 1er init (BD vide). Ordre = ordre alphabétique.
+      # Source réelle : backend/infrastructure/database/ (pas backend/migrations).
+      - ./backend/infrastructure/database/00-keycloak-schema.sql:/docker-entrypoint-initdb.d/00-keycloak-schema.sql:ro
+      - ./backend/infrastructure/database/01-extensions.sql:/docker-entrypoint-initdb.d/01-extensions.sql:ro
+      - ./backend/infrastructure/database/02-schema.sql:/docker-entrypoint-initdb.d/02-schema.sql:ro
+      - ./backend/infrastructure/database/03-indexes.sql:/docker-entrypoint-initdb.d/03-indexes.sql:ro
+      - ./backend/infrastructure/database/06-keycloak-migration.sql:/docker-entrypoint-initdb.d/06-keycloak-migration.sql:ro
+      - ./backend/infrastructure/database/07-notification-rdv.sql:/docker-entrypoint-initdb.d/07-notification-rdv.sql:ro
+      - ./backend/infrastructure/database/08-humeur-entries.sql:/docker-entrypoint-initdb.d/08-humeur-entries.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
