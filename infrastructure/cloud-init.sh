@@ -22,6 +22,7 @@
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/CHANGE-ME/mood-iot.git}"
+REPO_BRANCH="${REPO_BRANCH:-main}"
 APP_USER="${APP_USER:-}"
 APP_DIR="${APP_DIR:-/opt/mood-iot}"
 
@@ -109,12 +110,14 @@ fi
 
 # ── 7. Clonage du repo ──────────────────────────────────────────────────────
 if [ ! -d "$APP_DIR" ]; then
-    log "Clonage du repo dans $APP_DIR"
+    log "Clonage du repo ($REPO_BRANCH) dans $APP_DIR"
     install -d -o "$APP_USER" -g "$APP_USER" "$APP_DIR"
-    sudo -u "$APP_USER" git clone "$REPO_URL" "$APP_DIR"
+    sudo -u "$APP_USER" git clone --branch "$REPO_BRANCH" "$REPO_URL" "$APP_DIR"
 else
-    log "Repo déjà présent, git pull"
-    sudo -u "$APP_USER" git -C "$APP_DIR" pull --ff-only || true
+    log "Repo déjà présent, git pull ($REPO_BRANCH)"
+    sudo -u "$APP_USER" git -C "$APP_DIR" fetch origin "$REPO_BRANCH" || true
+    sudo -u "$APP_USER" git -C "$APP_DIR" checkout "$REPO_BRANCH" || true
+    sudo -u "$APP_USER" git -C "$APP_DIR" pull --ff-only origin "$REPO_BRANCH" || true
 fi
 
 # ── 8. .env.prod template (l'utilisateur le complète avant le 1er up) ──────
