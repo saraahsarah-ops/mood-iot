@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     JWT_SECRET_KEY: str = "change-me-in-production"
     JWT_ALGORITHM: str = "HS256"
 
+    # Secret partagé pour authentifier les appels inter-services internes
+    # (ex. patient → scoring /internal/). Vide = endpoint interne refuse tout.
+    INTERNAL_SERVICE_SECRET: str = ""
+
     # ── AWS ─────────────────────────────────────────────────────────────────
     AWS_REGION: str = "eu-west-3"
     AWS_ENDPOINT_URL: str | None = None

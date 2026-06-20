@@ -54,6 +54,10 @@ logger = logging.getLogger("mood_iot.notification.ai_coach")
 # Garde-fou : si le risque ≥ 80, on n'envoie PAS au patient — escalade au médecin
 RISK_HARD_CEILING = 80
 
+# Plafond anti-coûts : max de coachings IA générés par patient et par jour.
+# Empêche une boucle/job de multiplier les appels Claude sans limite.
+MAX_AI_COACHING_PER_DAY = 3
+
 # Modèle Anthropic — Haiku 4.5 (rapide + économique pour des messages courts FR)
 CLAUDE_MODEL = "claude-haiku-4-5"
 
@@ -82,7 +86,10 @@ async def _claude_generate(prompt: str) -> Optional[str]:
         logger.warning("ANTHROPIC_API_KEY absente — pas de génération IA")
         return None
     try:
-        client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        # timeout explicite : sans ça le SDK attend jusqu'à 600s (bloque le worker)
+        client = anthropic.AsyncAnthropic(
+            api_key=settings.ANTHROPIC_API_KEY, timeout=20.0
+        )
         resp = await client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=200,
@@ -126,11 +133,40 @@ async def send_ai_coaching(
     Returns:
         Dict {channel_value: success}.
     """
-    # 1. Garde-fou critique : pas de coaching IA si risque trop élevé
-    if risk_score is not None and risk_score >= RISK_HARD_CEILING:
+    # 1. Garde-fou critique. SÉCURITÉ : on REFUSE aussi si risk_score est absent —
+    # sans score on ne peut pas garantir que le patient n'est pas en risque
+    # critique, donc on n'envoie pas de coaching automatique à l'aveugle.
+    if risk_score is None:
+        logger.warning(
+            "send_ai_coaching: risk_score absent — coaching refusé par sécurité "
+            "(patient %s)", patient_id,
+        )
+        return {}
+    if risk_score >= RISK_HARD_CEILING:
         logger.info(
             "Risque %s ≥ %s — escalade médecin, pas de coaching IA",
             risk_score, RISK_HARD_CEILING,
+        )
+        return {}
+
+    # 1b. Plafond anti-coûts : pas plus de N coachings IA par patient par jour.
+    from datetime import timezone
+    from sqlalchemy import func as _func
+    today_start = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    count_res = await db.execute(
+        select(_func.count(Notification.id)).where(
+            Notification.patient_id == patient_id,
+            Notification.type == NotificationType.coaching_ia,
+            Notification.created_at >= today_start,
+        )
+    )
+    sent_today = int(count_res.scalar() or 0)
+    if sent_today >= MAX_AI_COACHING_PER_DAY:
+        logger.info(
+            "Plafond coaching IA atteint (%s/%s) pour patient %s — ignoré",
+            sent_today, MAX_AI_COACHING_PER_DAY, patient_id,
         )
         return {}
 

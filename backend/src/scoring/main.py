@@ -9,7 +9,7 @@ from datetime import date, datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import FastAPI, Depends, HTTPException, Query, status
+from fastapi import FastAPI, Depends, HTTPException, Query, status, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import select, and_
@@ -27,6 +27,59 @@ from src.shared.models import (
 from src.scoring.pipeline import get_pipeline, METRIC_MAPPING
 
 logger = logging.getLogger("mood_iot.scoring")
+
+
+# ---------------------------------------------------------------------------
+# Contrôle d'accès (anti-IDOR)
+# ---------------------------------------------------------------------------
+async def verify_patient_access(
+    patient_id: str, current_user: dict, db: AsyncSession
+) -> None:
+    """
+    Vérifie que `current_user` a le droit d'accéder aux données de `patient_id`.
+
+    - patient   : uniquement ses propres données (Patient.user_id == user_id)
+    - psychiatre : uniquement ses patients assignés (PatientPsychiatrist)
+    - admin     : accès total
+
+    Lève 403 sinon, 404 si le patient n'existe pas. Empêche les IDOR.
+    """
+    role = current_user.get("role")
+    if role == "admin":
+        return
+
+    res = await db.execute(select(Patient).where(Patient.id == patient_id))
+    patient = res.scalar_one_or_none()
+    if patient is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Patient introuvable"
+        )
+
+    if role == "patient":
+        if str(patient.user_id) != current_user["user_id"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Acces refuse"
+            )
+        return
+
+    if role == "psychiatre":
+        check = await db.execute(
+            select(PatientPsychiatrist).where(
+                and_(
+                    PatientPsychiatrist.patient_id == patient_id,
+                    PatientPsychiatrist.psychiatrist_id == current_user["user_id"],
+                )
+            )
+        )
+        if check.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Acces refuse"
+            )
+        return
+
+    # Rôle inconnu → refus par défaut
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acces refuse")
+
 
 # ---------------------------------------------------------------------------
 # Application
@@ -225,19 +278,11 @@ async def compute_score(
 ):
     """Calculer le score de risque pour un patient via le pipeline ML."""
 
+    # Anti-IDOR : seul le patient lui-même, son psychiatre, ou un admin.
+    await verify_patient_access(patient_id, current_user, db)
+
     target_date = payload.target_date or date.today()
     pipeline = get_pipeline()
-
-    # Verifier que le patient existe
-    result = await db.execute(
-        select(Patient).where(Patient.id == patient_id)
-    )
-    patient = result.scalar_one_or_none()
-    if patient is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Patient introuvable",
-        )
 
     # Verifier si un score existe deja pour cette date
     if not payload.force_recompute:
@@ -324,9 +369,21 @@ async def internal_compute_score(
     patient_id: str,
     payload: ComputeScoreRequest,
     db: AsyncSession = Depends(get_db),
-    x_internal_service: str = "",
+    x_internal_service: str = Header(default=""),
 ):
-    """Endpoint interne (sans auth) pour les appels inter-services."""
+    """
+    Endpoint interne pour les appels inter-services (patient → scoring).
+
+    Protégé par un secret partagé `INTERNAL_SERVICE_SECRET` passé en header
+    `X-Internal-Service`. Sans secret valide → 403. Empêche le déclenchement
+    externe de recalculs/alertes (l'ancien param était un query non validé).
+    """
+    expected = settings.INTERNAL_SERVICE_SECRET
+    if not expected or x_internal_service != expected:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acces interne refuse",
+        )
     target_date = payload.target_date or date.today()
     pipeline = get_pipeline()
 
@@ -382,6 +439,7 @@ async def get_latest_score(
     current_user: dict = Depends(get_current_user),
 ):
     """Recuperer le dernier score d'un patient."""
+    await verify_patient_access(patient_id, current_user, db)
     result = await db.execute(
         select(RiskScore)
         .where(RiskScore.patient_id == patient_id)
@@ -419,6 +477,7 @@ async def get_score_history(
     current_user: dict = Depends(get_current_user),
 ):
     """Recuperer l'historique des scores d'un patient."""
+    await verify_patient_access(patient_id, current_user, db)
     query = select(RiskScore).where(RiskScore.patient_id == patient_id)
 
     if from_date:
@@ -477,6 +536,9 @@ async def explain_score(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
         )
+
+    # Anti-IDOR : vérifier l'accès au patient propriétaire de ce score.
+    await verify_patient_access(str(explanation["patient_id"]), current_user, db)
 
     features = []
     for feat in explanation.get("features", []):

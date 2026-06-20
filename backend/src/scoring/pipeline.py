@@ -297,10 +297,16 @@ class ScoringPipeline:
             self._model = model
             self._use_heuristic = False
 
-            # Recuperer la version du modele depuis les metadonnees du fichier
-            self._model_version = f"xgboost-{self._model_path.stem}"
+            # HONNÊTETÉ TECHNIQUE : le SCORE est calculé par l'heuristique
+            # (_predict_score n'appelle PAS model.predict). XGBoost sert
+            # uniquement aux explications SHAP. Le model_version doit donc
+            # refléter que la décision vient de l'heuristique, pas du modèle.
+            # (cf. AUDIT_FINDINGS.md §2.1 — modèle à reconnecter après
+            #  réentraînement sans data leakage avant de scorer avec.)
+            self._model_version = f"{HEURISTIC_MODEL_VERSION}+shap-xgboost"
             logger.info(
-                "Modele XGBoost charge avec succes depuis '%s' (version: %s)",
+                "XGBoost chargé pour SHAP uniquement depuis '%s'. "
+                "Score = heuristique (version: %s)",
                 self._model_path,
                 self._model_version,
             )

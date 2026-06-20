@@ -44,7 +44,10 @@ class ClaudeCoachingChannel:
     def __init__(self) -> None:
         self._api_key = settings.ANTHROPIC_API_KEY
         if self._api_key:
-            self._client = anthropic.AsyncAnthropic(api_key=self._api_key)
+            # timeout explicite (défaut SDK = 600s → bloquerait le worker)
+            self._client = anthropic.AsyncAnthropic(
+                api_key=self._api_key, timeout=20.0
+            )
         else:
             self._client = None
             logger.warning(

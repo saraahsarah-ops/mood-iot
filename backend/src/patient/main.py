@@ -540,10 +540,8 @@ async def get_baseline(
     current_user: dict = Depends(get_current_user),
 ):
     """Recuperer les donnees de reference (baseline) d'un patient."""
-    # Verify patient exists
-    pat_result = await db.execute(select(Patient.id).where(Patient.id == patient_id))
-    if pat_result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient introuvable")
+    # Anti-IDOR : vérifier l'appartenance (patient lui-même / psychiatre / admin)
+    await _verify_patient_access(patient_id, current_user, db)
 
     # Get baselines
     result = await db.execute(
@@ -863,6 +861,7 @@ async def _trigger_scoring(patient_id: str, target_date: str):
             resp = await client.post(
                 f"{SCORING_SERVICE_URL}/scoring/internal/compute/{patient_id}",
                 json={"target_date": target_date, "force_recompute": True},
+                headers={"X-Internal-Service": settings.INTERNAL_SERVICE_SECRET},
             )
             if resp.status_code in (200, 201):
                 logger.info("Scoring triggered for patient %s date %s: score=%s",
@@ -964,6 +963,55 @@ async def _resolve_my_patient_id(
             detail="Profil patient introuvable",
         )
     return str(patient.id)
+
+
+async def _verify_patient_access(
+    patient_id: str, current_user: dict, db: AsyncSession
+) -> None:
+    """
+    Anti-IDOR : vérifie que `current_user` peut accéder aux données de
+    `patient_id`. patient → soi-même ; psychiatre → patients assignés ;
+    admin → tout. Lève 403/404 sinon.
+    """
+    role = current_user.get("role")
+    if role == "admin":
+        res = await db.execute(select(Patient.id).where(Patient.id == patient_id))
+        if res.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Patient introuvable"
+            )
+        return
+
+    res = await db.execute(select(Patient).where(Patient.id == patient_id))
+    patient = res.scalar_one_or_none()
+    if patient is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Patient introuvable"
+        )
+
+    if role == "patient":
+        if str(patient.user_id) != current_user["user_id"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Acces refuse"
+            )
+        return
+
+    if role == "psychiatre":
+        check = await db.execute(
+            select(PatientPsychiatrist).where(
+                and_(
+                    PatientPsychiatrist.patient_id == patient_id,
+                    PatientPsychiatrist.psychiatrist_id == current_user["user_id"],
+                )
+            )
+        )
+        if check.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Acces refuse"
+            )
+        return
+
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acces refuse")
 
 
 class SyncStatusResponse(BaseModel):
@@ -1198,10 +1246,8 @@ async def get_patient_metrics(
     Recuperer les metriques les plus recentes d'un patient
     (derniere journee) et les baselines calculees sur l'historique.
     """
-    # Verify patient exists
-    pat_result = await db.execute(select(Patient.id).where(Patient.id == patient_id))
-    if pat_result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient introuvable")
+    # Anti-IDOR : vérifier l'appartenance (patient lui-même / psychiatre / admin)
+    await _verify_patient_access(patient_id, current_user, db)
 
     # Get latest daily aggregate
     agg_result = await db.execute(

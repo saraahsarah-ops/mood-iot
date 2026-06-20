@@ -516,7 +516,9 @@ async def generate_ai_analysis(
         )
 
     try:
-        client = anthropic.AsyncAnthropic(api_key=api_key)
+        # timeout explicite : cet appel tourne dans une requête HTTP du
+        # psychiatre ; sans timeout le worker peut être bloqué jusqu'à 600s.
+        client = anthropic.AsyncAnthropic(api_key=api_key, timeout=30.0)
         response = await client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=1000,

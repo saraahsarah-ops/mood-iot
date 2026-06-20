@@ -8,7 +8,7 @@ import os
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -199,6 +199,10 @@ async def proxy_patient(request: Request, path: str):
 )
 async def proxy_scoring(request: Request, path: str):
     """Proxy vers le service Scoring (port 8003)."""
+    # Défense en profondeur : les routes /internal/ ne sont jamais exposées
+    # publiquement (réservées aux appels inter-services dans le réseau privé).
+    if path.startswith("internal/") or "/internal/" in path:
+        raise HTTPException(status_code=404, detail="Not found")
     return await _proxy(request, "scoring", f"scoring/{path}")
 
 
