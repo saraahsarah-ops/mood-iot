@@ -23,8 +23,8 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://cinthya.tail62357d.ts.net/api/v1",
-        "EXPO_PUBLIC_KEYCLOAK_DISCOVERY": "https://cinthya.tail62357d.ts.net:8443/realms/moodiot/.well-known/openid-configuration",
+        "EXPO_PUBLIC_API_URL": "https://api.mood-iot.fr/api/v1",
+        "EXPO_PUBLIC_KEYCLOAK_DISCOVERY": "https://auth.mood-iot.fr/realms/moodiot/.well-known/openid-configuration",
         "EXPO_PUBLIC_KEYCLOAK_CLIENT_ID": "mobile-app"
       }
     },
@@ -32,6 +32,11 @@
       "autoIncrement": true,
       "android": {
         "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.mood-iot.fr/api/v1",
+        "EXPO_PUBLIC_KEYCLOAK_DISCOVERY": "https://auth.mood-iot.fr/realms/moodiot/.well-known/openid-configuration",
+        "EXPO_PUBLIC_KEYCLOAK_CLIENT_ID": "mobile-app"
       }
     }
   },
