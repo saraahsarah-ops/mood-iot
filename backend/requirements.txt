@@ -6,6 +6,7 @@
 fastapi==0.115.*
 uvicorn[standard]==0.34.*
 pydantic==2.*
+slowapi==0.1.*  # rate limiting (anti brute-force / abus)
 pydantic-settings==2.*
 
 # ── Base de données ────────────────────────────────────────────────────────

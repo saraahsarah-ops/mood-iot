@@ -11,8 +11,24 @@ import httpx
 from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from src.shared.config import settings
+
+# ---------------------------------------------------------------------------
+# Rate limiting (anti brute-force / abus) — appliqué au gateway, point d'entrée
+# ---------------------------------------------------------------------------
+# 120 requêtes/minute par IP sur tout le gateway. Suffisant pour bloquer le
+# brute-force / scraping sans gêner un usage normal. (Keycloak a en plus sa
+# propre protection brute-force sur le login.)
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["120/minute"],
+    headers_enabled=True,
+)
 
 # ---------------------------------------------------------------------------
 # Application
@@ -26,6 +42,10 @@ app = FastAPI(
     version="1.0.0",
     description="Passerelle API pour la plateforme Mood-IoT",
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
