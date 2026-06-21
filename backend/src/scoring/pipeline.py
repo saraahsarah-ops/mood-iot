@@ -150,6 +150,18 @@ _t1, _t2, _t3 = settings.scoring_thresholds_tuple  # (40, 60, 80)
 # Version courante du modele heuristique
 HEURISTIC_MODEL_VERSION = "heuristic-v1.0.0"
 
+# Version + features du modèle XGBoost réentraîné (Depresjon, sans leakage).
+# DOIT correspondre exactement à MODEL_FEATURES de train_model.py (ordre inclus).
+XGBOOST_MODEL_VERSION = "xgboost-depresjon-v2"
+MODEL_FEATURES = [
+    "is_weekend",
+    "trend_14d",
+    "trend_7d",
+    "z_sleep_duration",
+    "z_sleep_quality",
+    "z_step_count",
+]
+
 # ── Messages SHAP en francais ────────────────────────────────────────────────
 
 # Modeles de messages explicatifs lisibles par les cliniciens
@@ -297,16 +309,12 @@ class ScoringPipeline:
             self._model = model
             self._use_heuristic = False
 
-            # HONNÊTETÉ TECHNIQUE : le SCORE est calculé par l'heuristique
-            # (_predict_score n'appelle PAS model.predict). XGBoost sert
-            # uniquement aux explications SHAP. Le model_version doit donc
-            # refléter que la décision vient de l'heuristique, pas du modèle.
-            # (cf. AUDIT_FINDINGS.md §2.1 — modèle à reconnecter après
-            #  réentraînement sans data leakage avant de scorer avec.)
-            self._model_version = f"{HEURISTIC_MODEL_VERSION}+shap-xgboost"
+            # Le modèle réentraîné (Depresjon, sans leakage) PRÉDIT réellement
+            # le score dans _predict_score. model_version le reflète honnêtement.
+            self._model_version = XGBOOST_MODEL_VERSION
             logger.info(
-                "XGBoost chargé pour SHAP uniquement depuis '%s'. "
-                "Score = heuristique (version: %s)",
+                "Modèle XGBoost chargé depuis '%s' — scoring via le modèle "
+                "(version: %s)",
                 self._model_path,
                 self._model_version,
             )
@@ -558,6 +566,28 @@ class ScoringPipeline:
         Returns:
             Tuple (score 0-100, confiance 0-1).
         """
+        # ── Modèle XGBoost réentraîné (Depresjon) : prédiction directe ───
+        # Si le modèle est chargé (et pas désactivé), il PRÉDIT réellement
+        # à partir des features actigraphie réelles (cf. MODEL_FEATURES).
+        # En cas de souci → fallback heuristique clinique ci-dessous.
+        if self._model is not None and not self._use_heuristic:
+            try:
+                x = np.array(
+                    [[feature_vector.get(f, 0.0) for f in MODEL_FEATURES]],
+                    dtype=np.float64,
+                )
+                pred = float(self._model.predict(x)[0])
+                score = max(0.0, min(100.0, pred))
+                n_avail = sum(
+                    1 for f in MODEL_FEATURES if feature_vector.get(f) is not None
+                )
+                confidence = round(n_avail / len(MODEL_FEATURES) * 0.9, 3)
+                return score, confidence
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Prédiction XGBoost échouée, fallback heuristique : %s", exc
+                )
+
         # ── A) Score base sur les Z-scores direction-aware ───────────────
         weighted_risk = 0.0
         total_weight = 0.0
