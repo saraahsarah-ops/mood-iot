@@ -160,6 +160,16 @@ class SHAPFeature(BaseModel):
     description_fr: str
 
 
+class DeviationItem(BaseModel):
+    """Déviation d'une métrique vs le baseline du patient (Z-score lisible)."""
+    metric: str
+    label: str
+    sigma: float
+    direction: str  # "below" | "above"
+    notable: bool
+    text: str
+
+
 class SHAPExplanation(BaseModel):
     score_id: str
     patient_id: str
@@ -167,6 +177,8 @@ class SHAPExplanation(BaseModel):
     risk_level: str
     base_value: float
     features: list[SHAPFeature]
+    # Couche 1 (cf. MODEL_DESIGN.md) : écarts au baseline individuel du patient.
+    deviations: list[DeviationItem] = []
     summary_fr: str
     generated_at: str
 
@@ -559,6 +571,9 @@ async def explain_score(
         risk_level=_classify_risk(explanation["score"]),
         base_value=explanation.get("base_value", 50.0),
         features=features,
+        deviations=[
+            DeviationItem(**d) for d in explanation.get("deviations", [])
+        ],
         summary_fr=explanation.get("summary_fr", ""),
         generated_at=datetime.now(timezone.utc).isoformat(),
     )

@@ -162,6 +162,50 @@ MODEL_FEATURES = [
     "z_step_count",
 ]
 
+# Libellés FR des Z-scores pour exposer les déviations de façon lisible.
+# +1 = la valeur haute est "bonne" ; -1 = la valeur basse est "à risque".
+_ZSCORE_LABELS_FR = {
+    "z_sleep_duration": "Sommeil",
+    "z_sleep_quality": "Qualité du sommeil / rythme",
+    "z_step_count": "Activité physique",
+    "z_heart_rate": "Fréquence cardiaque",
+    "z_hrv": "Variabilité cardiaque",
+    "z_gps_radius": "Mobilité (déplacements)",
+    "z_screen_time": "Temps d'écran",
+    "z_call_frequency": "Interactions sociales",
+}
+# Seuil (en écarts-types) à partir duquel une déviation est jugée notable.
+_DEVIATION_THRESHOLD = 1.0
+
+
+def _readable_deviations(feature_vector: dict[str, float]) -> list[dict[str, Any]]:
+    """
+    Convertit les Z-scores en déviations lisibles par un clinicien.
+
+    Couche 1 (cf. MODEL_DESIGN.md) : « ce patient s'écarte-t-il de SON normal ? ».
+    Ex : z_sleep_duration = -2.3 → {label: "Sommeil", sigma: -2.3,
+         direction: "below", notable: true, text: "Sommeil : 2.3σ sous l'habitude"}
+    Trié par amplitude décroissante. Indépendant du modèle (pur écart au baseline).
+    """
+    out: list[dict[str, Any]] = []
+    for z_name, label in _ZSCORE_LABELS_FR.items():
+        z = feature_vector.get(z_name)
+        if z is None:
+            continue
+        z = float(z)
+        direction = "below" if z < 0 else "above"
+        sense = "sous" if z < 0 else "au-dessus de"
+        out.append({
+            "metric": z_name,
+            "label": label,
+            "sigma": round(z, 2),
+            "direction": direction,
+            "notable": abs(z) >= _DEVIATION_THRESHOLD,
+            "text": f"{label} : {abs(z):.1f}σ {sense} l'habitude du patient",
+        })
+    out.sort(key=lambda d: abs(d["sigma"]), reverse=True)
+    return out
+
 # ── Messages SHAP en francais ────────────────────────────────────────────────
 
 # Modeles de messages explicatifs lisibles par les cliniciens
@@ -1124,27 +1168,29 @@ class ScoringPipeline:
         if risk_score is None:
             raise ValueError(f"Score introuvable avec l'identifiant {score_id}")
 
+        # Charger le vecteur de features (toujours, pour exposer les déviations
+        # Z-score lisibles — cf. Couche 1, MODEL_DESIGN.md).
+        feature_vector: dict[str, float] = {}
+        fv_stmt = select(FeatureVector).where(
+            FeatureVector.id == risk_score.feature_vector_id
+        )
+        fv_result = await db.execute(fv_stmt)
+        feature_vector_obj = fv_result.scalar_one_or_none()
+        if feature_vector_obj is not None:
+            feature_vector = json.loads(feature_vector_obj.vector_json)
+
         # Si les valeurs SHAP sont deja stockees, les reutiliser
         if risk_score.shap_values:
             shap_explanations = risk_score.shap_values
-        else:
-            # Recalculer a partir du vecteur de features
-            fv_stmt = select(FeatureVector).where(
-                FeatureVector.id == risk_score.feature_vector_id
-            )
-            fv_result = await db.execute(fv_stmt)
-            feature_vector_obj = fv_result.scalar_one_or_none()
-
-            if feature_vector_obj is None:
-                raise ValueError(
-                    f"Vecteur de features introuvable pour le score {score_id}"
-                )
-
-            # Reconstruire le vecteur de features depuis le JSON
-            feature_vector = json.loads(feature_vector_obj.vector_json)
+        elif feature_vector:
             shap_explanations = self._compute_shap_values(feature_vector)
+        else:
+            raise ValueError(
+                f"Vecteur de features introuvable pour le score {score_id}"
+            )
 
         top_features = shap_explanations[:3] if shap_explanations else []
+        deviations = _readable_deviations(feature_vector)
 
         # Generer le resume en francais
         summary_fr = self._generate_summary_fr(
@@ -1164,6 +1210,9 @@ class ScoringPipeline:
                 {"feature": f["feature"], "message": f["message"]}
                 for f in top_features
             ],
+            # Couche 1 : déviations du baseline individuel (Z-score), lisibles.
+            # Rend tangible « ce patient s'écarte de SON normal » (rechute).
+            "deviations": deviations,
             "summary_fr": summary_fr,
         }
 
