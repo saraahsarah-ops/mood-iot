@@ -76,11 +76,50 @@ class Settings(BaseSettings):
     ENCRYPTION_KEY: str = ""
     FILE_UPLOAD_DIR: str = "/tmp/mood-iot-certifications"
 
+    # ── CORS ──────────────────────────────────────────────────────────────
+    # Liste d'origines autorisées séparées par des virgules. '*' = tout (dev).
+    # En prod, mettre les domaines réels (ex: https://dashboard.mood-iot.fr).
+    ALLOWED_ORIGINS: str = "*"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """Parse ALLOWED_ORIGINS '<a>,<b>' → ['<a>', '<b>']."""
+        raw = self.ALLOWED_ORIGINS.strip()
+        if raw == "*":
+            return ["*"]
+        return [o.strip() for o in raw.split(",") if o.strip()]
+
     @property
     def scoring_thresholds_tuple(self) -> tuple[int, int, int]:
         """Parse '40/60/80' → (40, 60, 80)."""
         parts = self.SCORING_THRESHOLDS.split("/")
         return int(parts[0]), int(parts[1]), int(parts[2])
+
+    def validate_production_secrets(self) -> None:
+        """
+        En production, refuse de démarrer si des secrets critiques ont encore
+        leur valeur par défaut « change-me » ou sont vides. Évite de lancer un
+        service de santé avec des secrets connus. Appelé au boot du gateway.
+        """
+        if self.ENVIRONMENT != "production":
+            return
+        problems: list[str] = []
+        checks = {
+            "JWT_SECRET_KEY": self.JWT_SECRET_KEY,
+            "ENCRYPTION_KEY": self.ENCRYPTION_KEY,
+            "INTERNAL_SERVICE_SECRET": self.INTERNAL_SERVICE_SECRET,
+        }
+        for name, value in checks.items():
+            if not value or "change-me" in value.lower():
+                problems.append(name)
+        if self.ALLOWED_ORIGINS.strip() == "*":
+            problems.append("ALLOWED_ORIGINS (='*' interdit en production)")
+        if problems:
+            raise RuntimeError(
+                "Secrets non configurés en production : "
+                + ", ".join(problems)
+                + ". Définissez-les dans l'environnement avant de démarrer."
+            )
 
     class Config:
         env_file = ".env"

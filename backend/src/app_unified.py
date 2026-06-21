@@ -32,6 +32,7 @@ from starlette.routing import Route, WebSocketRoute
 # Import des sous-applications
 # ---------------------------------------------------------------------------
 
+from src.shared.config import settings
 from src.auth.main import app as auth_app
 from src.doctor.main import app as doctor_app
 from src.patient.main import app as patient_app
@@ -70,7 +71,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

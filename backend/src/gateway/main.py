@@ -18,6 +18,9 @@ from src.shared.config import settings
 # Application
 # ---------------------------------------------------------------------------
 
+# Refuse de démarrer en production avec des secrets par défaut (« change-me »).
+settings.validate_production_secrets()
+
 app = FastAPI(
     title="Mood-IoT API Gateway",
     version="1.0.0",
@@ -26,7 +29,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
