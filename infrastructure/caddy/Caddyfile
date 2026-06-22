@@ -65,3 +65,20 @@ auth.mood-iot.fr {
         header_up X-Forwarded-Host {host}
     }
 }
+
+# ── Dashboard médecin (Next.js) ──────────────────────────────────────────
+dashboard.mood-iot.fr {
+    encode zstd gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    reverse_proxy dashboard:3000 {
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-Host {host}
+    }
+}

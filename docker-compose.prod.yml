@@ -238,6 +238,33 @@ services:
       args:
         SERVICE_NAME: doctor
 
+  # ── Dashboard médecin (Next.js standalone) ──────────────────────────────
+  dashboard:
+    image: ${REGISTRY:-mood-iot}/dashboard:${TAG:-latest}
+    restart: *restart
+    build:
+      context: ./frontend/dashboard
+      dockerfile: Dockerfile
+      args:
+        # URL publique de l'API (injectée au build, côté navigateur)
+        NEXT_PUBLIC_API_URL: https://api.mood-iot.fr/api/v1
+    environment:
+      # NextAuth v5 + Keycloak (runtime)
+      AUTH_KEYCLOAK_ID: dashboard-medecin
+      AUTH_KEYCLOAK_ISSUER: https://auth.mood-iot.fr/realms/moodiot
+      AUTH_KEYCLOAK_SECRET: ${AUTH_KEYCLOAK_SECRET}
+      AUTH_SECRET: ${AUTH_SECRET}
+      AUTH_URL: https://dashboard.mood-iot.fr
+      AUTH_TRUST_HOST: "true"
+      NEXT_PUBLIC_API_URL: https://api.mood-iot.fr/api/v1
+    depends_on:
+      - keycloak
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   postgres_data:
   redis_data:
