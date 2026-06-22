@@ -162,6 +162,13 @@ MODEL_FEATURES = [
     "z_step_count",
 ]
 
+# Score HYBRIDE (cf. MODEL_DESIGN.md) : combine la déviation au baseline
+# (heuristique direction-aware → détecte la RECHUTE) et le niveau clinique
+# (modèle XGBoost/Depresjon). Poids dominant à l'heuristique car c'est elle qui
+# capte le but du projet (rechute). Le modèle apporte le contexte de niveau.
+HYBRID_MODEL_VERSION = "hybrid-heuristic+xgboost-v1"
+HYBRID_HEUR_WEIGHT = 0.65  # 65 % heuristique (déviation) / 35 % modèle (niveau)
+
 # Libellés FR des Z-scores pour exposer les déviations de façon lisible.
 # +1 = la valeur haute est "bonne" ; -1 = la valeur basse est "à risque".
 _ZSCORE_LABELS_FR = {
@@ -353,12 +360,12 @@ class ScoringPipeline:
             self._model = model
             self._use_heuristic = False
 
-            # Le modèle réentraîné (Depresjon, sans leakage) PRÉDIT réellement
-            # le score dans _predict_score. model_version le reflète honnêtement.
-            self._model_version = XGBOOST_MODEL_VERSION
+            # Score HYBRIDE : heuristique (déviation/rechute) + modèle (niveau).
+            # model_version le reflète honnêtement.
+            self._model_version = HYBRID_MODEL_VERSION
             logger.info(
-                "Modèle XGBoost chargé depuis '%s' — scoring via le modèle "
-                "(version: %s)",
+                "Modèle XGBoost chargé depuis '%s' — scoring HYBRIDE "
+                "(heuristique + modèle, version: %s)",
                 self._model_path,
                 self._model_version,
             )
@@ -610,28 +617,23 @@ class ScoringPipeline:
         Returns:
             Tuple (score 0-100, confiance 0-1).
         """
-        # ── Modèle XGBoost réentraîné (Depresjon) : prédiction directe ───
-        # Si le modèle est chargé (et pas désactivé), il PRÉDIT réellement
-        # à partir des features actigraphie réelles (cf. MODEL_FEATURES).
-        # En cas de souci → fallback heuristique clinique ci-dessous.
+        # ── Couche 2 (modèle XGBoost) : NIVEAU clinique appris sur Depresjon ─
+        # On le calcule SANS retourner tout de suite : il sera combiné avec
+        # l'heuristique (Couche 1) pour former le score hybride final.
+        model_score: Optional[float] = None
         if self._model is not None and not self._use_heuristic:
             try:
                 x = np.array(
                     [[feature_vector.get(f, 0.0) for f in MODEL_FEATURES]],
                     dtype=np.float64,
                 )
-                pred = float(self._model.predict(x)[0])
-                score = max(0.0, min(100.0, pred))
-                n_avail = sum(
-                    1 for f in MODEL_FEATURES if feature_vector.get(f) is not None
-                )
-                confidence = round(n_avail / len(MODEL_FEATURES) * 0.9, 3)
-                return score, confidence
+                model_score = max(0.0, min(100.0, float(self._model.predict(x)[0])))
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
-                    "Prédiction XGBoost échouée, fallback heuristique : %s", exc
+                    "Prédiction XGBoost échouée, ignorée dans l'hybride : %s", exc
                 )
 
+        # ── Couche 1 (heuristique direction-aware) : DÉVIATION = rechute ──
         # ── A) Score base sur les Z-scores direction-aware ───────────────
         weighted_risk = 0.0
         total_weight = 0.0
@@ -715,15 +717,29 @@ class ScoringPipeline:
         raw_trend = (trend_7d * 0.7 + trend_14d * 0.3) * 1.0
         trend_adjustment = max(-10.0, min(10.0, raw_trend))
 
-        # ── Score final ──────────────────────────────────────────────────
-        score = base_score + clinical_penalty + comorbidity_bonus + trend_adjustment
+        # ── Score heuristique (Couche 1) ─────────────────────────────────
+        heuristic_score = base_score + clinical_penalty + comorbidity_bonus + trend_adjustment
+        heuristic_score = max(0.0, min(100.0, heuristic_score))
+
+        # ── Score HYBRIDE : Couche 1 (déviation/rechute) + Couche 2 (niveau) ─
+        if model_score is not None:
+            score = (
+                HYBRID_HEUR_WEIGHT * heuristic_score
+                + (1.0 - HYBRID_HEUR_WEIGHT) * model_score
+            )
+            logger.info(
+                "Score HYBRIDE: %.0f%% heuristique(%.1f) + %.0f%% modèle(%.1f) = %.1f",
+                HYBRID_HEUR_WEIGHT * 100, heuristic_score,
+                (1 - HYBRID_HEUR_WEIGHT) * 100, model_score, score,
+            )
+        else:
+            score = heuristic_score
+            logger.info(
+                "Score heuristique seul: base_z=%.1f + clinical=%.1f + comorbid=%.1f + trend=%.1f = %.1f",
+                base_score, clinical_penalty, comorbidity_bonus, trend_adjustment, heuristic_score,
+            )
+
         score = round(max(0.0, min(100.0, score)), 2)
-
-        logger.info(
-            "Score decompose: base_z=%.1f + clinical=%.1f + comorbid=%.1f + trend=%.1f = %.1f",
-            base_score, clinical_penalty, comorbidity_bonus, trend_adjustment, score,
-        )
-
         return score, confidence
 
     def _estimate_confidence(self, feature_vector: dict[str, float]) -> float:
