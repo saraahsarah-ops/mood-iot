@@ -22,9 +22,8 @@ from src.shared.models import (
     TeleconsultSession,
     SessionNote,
     TeleconsultStatus,
-    AlertFeedback,
+    TeleconsultTrigger,
     Message,
-    User,
 )
 
 # ---------------------------------------------------------------------------
@@ -619,7 +618,7 @@ async def send_message(
         raise HTTPException(status_code=404, detail="Patient introuvable")
         
     # Get primary psychiatrist
-    psych_result = await db.execute(select(PatientPsychiatrist).where(and_(PatientPsychiatrist.patient_id == patient_id, PatientPsychiatrist.is_primary == True)))
+    psych_result = await db.execute(select(PatientPsychiatrist).where(and_(PatientPsychiatrist.patient_id == patient_id, PatientPsychiatrist.is_primary.is_(True))))
     assignment = psych_result.scalar_one_or_none()
     
     sender_id = current_user["user_id"]

@@ -7,7 +7,6 @@ Connecte a PostgreSQL via SQLAlchemy async.
 import logging
 from datetime import date, datetime, timezone
 from typing import Optional
-from uuid import UUID
 
 from fastapi import FastAPI, Depends, HTTPException, Query, status, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,16 +14,15 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from uuid import uuid4
 
 from src.shared.config import settings
 from src.shared.auth import get_current_user, require_role
 from src.shared.database import get_db
 from src.shared.models import (
-    RiskScore, FeatureVector, Patient, Baseline, DailyAggregate,
+    RiskScore, Patient, Baseline, DailyAggregate,
     PatientPsychiatrist, Notification, NotificationType, NotificationChannel, NotificationStatus,
 )
-from src.scoring.pipeline import get_pipeline, METRIC_MAPPING
+from src.scoring.pipeline import get_pipeline
 
 logger = logging.getLogger("mood_iot.scoring")
 

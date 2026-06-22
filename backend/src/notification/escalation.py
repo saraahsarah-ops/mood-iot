@@ -20,7 +20,6 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.shared.config import settings
 from src.shared.models import (
     EscalationLog,
     Notification,

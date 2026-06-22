@@ -21,24 +21,21 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
 
 import numpy as np
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.shared.config import settings
-from src.shared.database import AsyncSessionLocal
 from src.shared.models import (
     DailyAggregate,
     Baseline,
     FeatureVector,
     RiskScore,
-    ModelVersion,
 )
 
 # ── Logging ───────────────────────────────────────────────────────────────────

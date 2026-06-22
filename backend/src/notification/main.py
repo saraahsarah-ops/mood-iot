@@ -24,7 +24,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from sqlalchemy import select, and_, func, update
+from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.shared.config import settings
@@ -32,7 +32,6 @@ from src.shared.auth import get_current_user, require_role
 from src.shared.database import get_db
 from src.shared.models import (
     Notification,
-    EscalationLog,
     NotificationType,
     NotificationChannel as NotifChannelEnum,
     NotificationStatus,
@@ -569,8 +568,10 @@ async def websocket_alerts(websocket: WebSocket, user_id: str):
 # ===========================================================================
 
 
-from src.notification.rdv_reminder_service import send_reminder as _send_rdv_reminder
-from src.notification.ai_coach import send_ai_coaching as _send_ai_coaching
+# Imports différés (en bas de fichier) pour éviter les imports circulaires :
+# rdv_reminder_service et ai_coach importent depuis ce module.
+from src.notification.rdv_reminder_service import send_reminder as _send_rdv_reminder  # noqa: E402
+from src.notification.ai_coach import send_ai_coaching as _send_ai_coaching  # noqa: E402
 
 
 class AiCoachingRequest(BaseModel):

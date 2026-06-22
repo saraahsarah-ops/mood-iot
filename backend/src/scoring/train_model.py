@@ -385,7 +385,7 @@ def train_and_evaluate(X, y, groups):
     test_rmse = float(np.sqrt(mean_squared_error(y_te, pred_te)))
     test_mae = float(mean_absolute_error(y_te, pred_te))
     test_r2 = float(r2_score(y_te, pred_te))
-    print(f"\n  ===== MÉTRIQUES SUR TEST HOLDOUT (patients jamais vus) =====")
+    print("\n  ===== MÉTRIQUES SUR TEST HOLDOUT (patients jamais vus) =====")
     print(f"  RMSE={test_rmse:.2f} | MAE={test_mae:.2f} | R²={test_r2:.4f}")
 
     # Classification 4 niveaux sur le test

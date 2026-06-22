@@ -54,8 +54,8 @@ class RdvContext:
 def push_title(kind: ReminderKind, ctx: RdvContext) -> str:
     return {
         "24h": f"Rendez-vous demain à {ctx.time_fr}",
-        "1h":  f"Rendez-vous dans 1 heure",
-        "now": f"Votre rendez-vous commence",
+        "1h":  "Rendez-vous dans 1 heure",
+        "now": "Votre rendez-vous commence",
     }[kind]
 
 
@@ -97,8 +97,8 @@ def sms_body(kind: ReminderKind, ctx: RdvContext) -> str:
 def email_subject(kind: ReminderKind, ctx: RdvContext) -> str:
     return {
         "24h": f"Rappel : votre rendez-vous demain {ctx.date_fr} à {ctx.time_fr}",
-        "1h":  f"Votre rendez-vous commence dans 1 heure",
-        "now": f"Votre téléconsultation commence maintenant",
+        "1h":  "Votre rendez-vous commence dans 1 heure",
+        "now": "Votre téléconsultation commence maintenant",
     }[kind]
 
 

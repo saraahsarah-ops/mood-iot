@@ -10,7 +10,6 @@ Idempotence garantie côté `rdv_reminder_service` (table rdv_reminder_log).
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 

@@ -17,12 +17,12 @@ est rendue par Keycloak (FR via realm theme).
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date
 from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,7 +30,7 @@ from src.shared.config import settings
 from src.shared.auth import current_user_uuid, get_current_user
 from src.shared.audit import log_action
 from src.shared.database import get_db
-from src.shared.keycloak import extract_roles, verify_access_token
+from src.shared.keycloak import verify_access_token
 from src.shared.models import (
     DoctorProfile,
     Patient,
