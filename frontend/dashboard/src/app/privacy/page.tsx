@@ -156,8 +156,9 @@ const sections = [
       <ul className="list-disc space-y-1.5 pl-5">
         <li>
           <strong>Chiffrement TLS 1.3</strong> en transit pour toutes les
-          communications. Le chiffrement applicatif des champs de sante
-          sensibles au repos est en cours de deploiement.
+          communications, et <strong>chiffrement applicatif (Fernet)</strong>
+          des champs de sante sensibles au repos : diagnostic, notes cliniques,
+          messages et transcriptions.
         </li>
         <li>
           <strong>Authentification JWT</strong> avec tokens a duree de vie
