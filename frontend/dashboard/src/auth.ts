@@ -110,6 +110,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       clientId: process.env.AUTH_KEYCLOAK_ID ?? "dashboard-medecin",
       clientSecret: process.env.AUTH_KEYCLOAK_SECRET ?? "",
       issuer: process.env.AUTH_KEYCLOAK_ISSUER,
+      // `prompt=login` force Keycloak à TOUJOURS afficher le formulaire de
+      // connexion (email/mot de passe), même si une session SSO est encore
+      // active côté Keycloak. Sans ça, après un premier login, cliquer
+      // « Se connecter » ré-authentifie en silence et redirige direct vers le
+      // dashboard. La page de login Keycloak porte aussi le lien
+      // « Créer un compte » (registrationAllowed=true) pour l'inscription.
+      authorization: { params: { prompt: "login" } },
     }),
   ],
   // Session strategy 'jwt' = NextAuth stocke l'access_token Keycloak dans le
