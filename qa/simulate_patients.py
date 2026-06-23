@@ -184,7 +184,9 @@ async def _score_patient(db, pipeline, patient_id, label, profile):
     except Exception as e:  # noqa: BLE001
         print(f"  baseline {label}: {e}")
     last = None
-    for back in (2, 1, 0):
+    # Scores sur toute la fenêtre (N_DAYS) pour que la courbe d'évolution
+    # affiche l'historique complet, pas seulement les 3 derniers jours.
+    for back in range(N_DAYS - 1, -1, -1):
         d = date.today() - timedelta(days=back)
         try:
             last = await pipeline.compute_score(str(patient_id), d, db)
