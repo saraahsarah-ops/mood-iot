@@ -257,12 +257,39 @@ Le realm `moodiot` n'existe pas encore — il faut l'importer.
 ### 5.2 Importer le realm
 
 1. Top-left : dropdown du realm → **"Create Realm"**
-2. **Resource file → Browse** → sélectionne `infrastructure/keycloak/realms/moodiot.json` (depuis ton repo local)
+2. **Resource file → Browse** → sélectionne `infrastructure/keycloak/realm-moodiot.json` (depuis ton repo local)
 3. **Create**
 
-> Si ce fichier n'existe pas dans ton repo, voir la procédure de fallback à la fin du document.
+> En prod le realm est importé automatiquement au boot via `start --import-realm`
+> (le fichier est monté dans le conteneur). L'import manuel ci-dessus n'est utile
+> que pour un Keycloak géré hors compose.
 
-### 5.3 Créer le user de test Marie
+### 5.3 ⚠️ OBLIGATOIRE — Régénérer les secrets des clients
+
+Le `realm-moodiot.json` contient des secrets **placeholder** publics
+(`"secret": "REPLACE_ME_..."`). Si tu ne les régénères pas, le secret OAuth de
+production est un string connu de quiconque lit le dépôt. Pour chaque client
+confidentiel (`dashboard-medecin`, `backend-services`) :
+
+1. Realm `moodiot` → **Clients → `dashboard-medecin` → Credentials → Regenerate**
+2. Copie le nouveau secret dans `/opt/mood-iot/.env.prod` :
+   - `dashboard-medecin`  → `AUTH_KEYCLOAK_SECRET=...`
+   - `backend-services`   → `KEYCLOAK_ADMIN_CLIENT_SECRET=...`
+3. Recharge les conteneurs concernés (⚠️ `up -d`, pas `restart`, pour relire le
+   fichier d'env) :
+
+```bash
+cd /opt/mood-iot
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d \
+  dashboard gateway-service auth-service patient-service ml-scoring \
+  notification-service doctor-service teleconsult-service
+```
+
+> Vérif : `client_credentials` avec `backend-services` doit renvoyer un
+> `access_token` (secret valide). Régénérer un secret n'invalide PAS les
+> sessions en cours.
+
+### 5.4 Créer le user de test Marie
 
 1. Realm `moodiot` → **Users → Add user**
    - Username : `marie.dupont@example.test`
@@ -276,26 +303,46 @@ Le realm `moodiot` n'existe pas encore — il faut l'importer.
 
 ---
 
-## Phase 6 — Dashboard sur Vercel (10 min)
+## Phase 6 — Dashboard médecin sur Hetzner (PAS Vercel)
 
-Identique à `ORACLE_SETUP.md` — pas changé :
+Pour la cohérence de souveraineté RGPD, le dashboard est hébergé sur le **même
+serveur Hetzner** (et non sur Vercel/USA). C'est un service du
+`docker-compose.prod.yml` (`dashboard`, Next.js standalone) servi par Caddy sur
+`dashboard.mood-iot.fr`.
 
-1. <https://vercel.com/signup> → connecte-toi avec GitHub
-2. **Add New Project → Import** le repo `mood-iot`
-3. **Root Directory** : `frontend/dashboard`
-4. **Environment Variables** :
+1. DNS : enregistrement A `dashboard.mood-iot.fr` → IP du serveur (chez OVH).
+2. Variables d'env dans `/opt/mood-iot/.env.prod` (NextAuth v5 — noms `AUTH_*`,
+   pas les anciens `NEXTAUTH_*`) :
 
-| Name | Value |
+| Clé (.env.prod) | Valeur |
 |---|---|
-| `NEXTAUTH_URL` | `https://dashboard.mood-iot.fr` |
-| `NEXTAUTH_SECRET` | `<openssl rand -base64 32>` |
-| `KEYCLOAK_CLIENT_ID` | `dashboard-medecin` |
-| `KEYCLOAK_CLIENT_SECRET` | `<récupérer dans Keycloak admin → Clients → dashboard-medecin → Credentials>` |
-| `KEYCLOAK_ISSUER` | `https://auth.mood-iot.fr/realms/moodiot` |
-| `NEXT_PUBLIC_API_URL` | `https://api.mood-iot.fr/api/v1` |
+| `AUTH_SECRET` | `<openssl rand -base64 32>` |
+| `AUTH_KEYCLOAK_SECRET` | secret régénéré du client `dashboard-medecin` (cf. Phase 5.3) |
 
-5. **Deploy** → 3 min
-6. **Settings → Domains → Add** `dashboard.mood-iot.fr` (le CNAME OVH pointe déjà ici)
+> `AUTH_KEYCLOAK_ID`, `AUTH_KEYCLOAK_ISSUER`, `AUTH_URL`, `AUTH_TRUST_HOST` et
+> `NEXT_PUBLIC_API_URL` sont déjà fixés dans le service `dashboard` du
+> `docker-compose.prod.yml` (pas besoin de les mettre dans `.env.prod`).
+
+3. Build + démarrage :
+
+```bash
+cd /opt/mood-iot
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build dashboard
+```
+
+4. Caddy expose déjà `dashboard.mood-iot.fr`. **Après tout ajout de domaine au
+   Caddyfile, `restart` le conteneur caddy** (un `reload` ne suffit pas) pour
+   qu'il émette le certificat Let's Encrypt :
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod restart caddy
+```
+
+> **Dev d'équipe** : pour lancer le dashboard en local (`npm run dev`) contre ce
+> backend déployé, `ALLOWED_ORIGINS` dans `.env.prod` doit inclure
+> `http://localhost:3000` (en plus de `https://dashboard.mood-iot.fr`). À
+> retirer avant la mise en production avec de vrais patients. Voir
+> `frontend/dashboard/.env.example`.
 
 ✅ **Phase 6 OK** → dashboard sur <https://dashboard.mood-iot.fr>
 
