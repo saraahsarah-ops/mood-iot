@@ -104,11 +104,11 @@ export async function getLatestScore(patientId: string): Promise<LatestScore> {
 export interface ScoreHistory {
   date: string;
   score: number;
-  steps: number;
-  sleep: number;
-  heartRate: number;
+  risk_level: string;
+  alert_level: number;
 }
 
+/** Le backend renvoie { patient_id, scores: [...], total } → on déballe scores. */
 export async function getScoreHistory(
   patientId: string,
   fromDate?: string,
@@ -118,7 +118,26 @@ export async function getScoreHistory(
   if (fromDate) params.set("from_date", fromDate);
   if (toDate) params.set("to_date", toDate);
   const qs = params.toString();
-  return request(`/scoring/history/${patientId}${qs ? `?${qs}` : ""}`);
+  const res = await request<{ scores?: ScoreHistory[] }>(
+    `/scoring/history/${patientId}${qs ? `?${qs}` : ""}`,
+  );
+  return res.scores ?? [];
+}
+
+/* ── Profil patient du user connecté (résout patient.id) ──────── */
+export interface MyPatient {
+  id: string;
+  first_name: string;
+  last_name: string;
+  date_of_birth: string;
+  gender: string;
+  email?: string | null;
+  phone?: string | null;
+}
+
+/** GET /patients/me — le client n'a que user.id ; ceci donne le patient.id. */
+export async function getMyPatient(): Promise<MyPatient> {
+  return request("/patients/me");
 }
 
 /* ── Health Data Sync ─────────────────────────── */

@@ -1,5 +1,6 @@
 import { Tabs } from "expo-router";
 import { Platform, Text, View, Alert } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useEffect, useState } from "react";
 import { useMessagesStore } from "@/stores/messagesStore";
 import { useAuthStore } from "@/stores/authStore";
@@ -49,6 +50,9 @@ export default function TabsLayout() {
   // Charge le compteur de messages non lus au demarrage et toutes les 60s
   const refreshUnread = useMessagesStore((s) => s.refreshUnreadCount);
   const signOut = useAuthStore((s) => s.signOut);
+  // Marge basse pour ne pas être masqué par la barre de navigation/gestes
+  // du téléphone (Android 14+/gestures, encoches iOS).
+  const insets = useSafeAreaInsets();
 
   // Vérification du consentement RGPD/CGU à la 1re ouverture des tabs.
   // Si l'utilisateur n'a jamais accepté → modal bloquante.
@@ -126,8 +130,9 @@ export default function TabsLayout() {
           backgroundColor: "#fff",
           borderTopWidth: 0.5,
           borderTopColor: "#e0e0e0",
-          paddingBottom: Platform.OS === "ios" ? 20 : 8,
-          height: Platform.OS === "ios" ? 85 : 65,
+          // Ajoute la marge de safe-area du bas (barre de gestes Android 14+/iOS).
+          paddingBottom: (Platform.OS === "ios" ? 20 : 8) + insets.bottom,
+          height: (Platform.OS === "ios" ? 85 : 65) + insets.bottom,
         },
         tabBarLabelStyle: { fontSize: 11, fontWeight: "500" },
       }}

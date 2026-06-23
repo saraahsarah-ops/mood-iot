@@ -298,6 +298,29 @@ export async function requestPermissions(): Promise<boolean> {
     const HC = await getHC();
     if (HC) {
       try {
+        // IMPORTANT : vérifier la disponibilité AVANT initialize(). Sur certains
+        // appareils, appeler initialize() quand Health Connect n'est pas
+        // disponible provoque un crash NATIF (non rattrapable en JS).
+        // Android 14+ : Health Connect est intégré au système (Paramètres) ;
+        // Android ≤13 : c'est une app Play Store à installer.
+        if (typeof HC.getSdkStatus === "function") {
+          const statusCode = await HC.getSdkStatus();
+          const available =
+            HC.SdkAvailabilityStatus?.SDK_AVAILABLE ?? 3;
+          if (statusCode !== available) {
+            console.warn(
+              "[healthSync] Health Connect indisponible (status=",
+              statusCode,
+              ")",
+            );
+            granted = false;
+            // On marque comme "demandé" et on sort proprement, sans crash.
+            try {
+              await SecureStore.setItemAsync(KEY_PERMISSIONS_GRANTED, "false");
+            } catch {}
+            return false;
+          }
+        }
         await HC.initialize();
         const result = await HC.requestPermission(ANDROID_PERMISSIONS);
         granted = Array.isArray(result) && result.length > 0;

@@ -2,10 +2,11 @@ import { useEffect } from "react";
 import { View, Text, ScrollView, StyleSheet } from "react-native";
 import { useHealthStore } from "@/stores/healthStore";
 
-function getWellbeingLevel(score: number) {
-  if (score >= 70) return { level: "Niveau 3", emoji: "🔴", color: "#e74c3c", label: "Consultez votre medecin" };
-  if (score >= 40) return { level: "Niveau 2", emoji: "🟡", color: "#f39c12", label: "Restez vigilant(e)" };
-  return { level: "Niveau 1", emoji: "🟢", color: "#2ecc71", label: "Tout va bien" };
+function getWellbeingLevel(level: number) {
+  if (level >= 3) return { level: "Alerte", emoji: "🔴", color: "#e74c3c", label: "Consultez votre medecin" };
+  if (level === 2) return { level: "Niveau 2", emoji: "🟠", color: "#e67e22", label: "Vigilance renforcee" };
+  if (level === 1) return { level: "Niveau 1", emoji: "🟡", color: "#f39c12", label: "Restez vigilant(e)" };
+  return { level: "Stable", emoji: "🟢", color: "#2ecc71", label: "Tout va bien" };
 }
 
 export default function HistoryScreen() {
@@ -29,7 +30,7 @@ export default function HistoryScreen() {
         </View>
       ) : (
         history.map((entry, i) => {
-          const wb = getWellbeingLevel(entry.score);
+          const wb = getWellbeingLevel(entry.level);
           return (
             <View key={i} style={styles.card}>
               <View style={styles.cardHeader}>
@@ -42,9 +43,7 @@ export default function HistoryScreen() {
               </View>
               <Text style={styles.cardLabel}>{wb.label}</Text>
               <View style={styles.metricsRow}>
-                <MiniMetric emoji="👟" value={`${entry.steps}`} />
-                <MiniMetric emoji="😴" value={`${entry.sleep}h`} />
-                <MiniMetric emoji="❤️" value={`${entry.heartRate}`} />
+                <MiniMetric emoji="📈" value={`Score ${entry.score}/100`} />
               </View>
             </View>
           );

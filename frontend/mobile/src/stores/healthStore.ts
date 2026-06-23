@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import * as api from "@/services/api";
 import * as healthSync from "@/services/healthSync";
-import { useAuthStore } from "./authStore";
 
 interface Metrics {
   steps: number;
@@ -13,9 +12,7 @@ interface Metrics {
 interface HistoryEntry {
   date: string;
   score: number;
-  steps: number;
-  sleep: number;
-  heartRate: number;
+  level: number; // alert_level 0..3
 }
 
 interface HealthState {
@@ -37,8 +34,15 @@ interface HealthState {
   submitPhq9: (answers: number[]) => Promise<void>;
 }
 
-function getPatientId(): string {
-  return useAuthStore.getState().user?.id || "";
+// Cache du patient.id résolu (le user.id ≠ patient.id ; les endpoints scoring
+// attendent le patient.id). Résolu une fois via GET /patients/me.
+let _patientIdCache: string | null = null;
+
+async function resolvePatientId(): Promise<string> {
+  if (_patientIdCache) return _patientIdCache;
+  const p = await api.getMyPatient();
+  _patientIdCache = p.id;
+  return p.id;
 }
 
 export const useHealthStore = create<HealthState>((set) => ({
@@ -48,9 +52,8 @@ export const useHealthStore = create<HealthState>((set) => ({
   history: [],
 
   fetchLatest: async () => {
-    const pid = getPatientId();
-    if (!pid) return;
     try {
+      const pid = await resolvePatientId();
       const data = await api.getLatestScore(pid);
       set({
         latestScore: data.score,
@@ -74,20 +77,20 @@ export const useHealthStore = create<HealthState>((set) => ({
   },
 
   fetchHistory: async () => {
-    const pid = getPatientId();
-    if (!pid) return;
     try {
+      const pid = await resolvePatientId();
       const data = await api.getScoreHistory(pid);
+      // Le backend renvoie les plus récents en premier — on remet en ordre
+      // chronologique pour l'affichage.
+      const ordered = [...data].reverse();
       set({
-        history: data.map((d) => ({
+        history: ordered.map((d) => ({
           date: new Date(d.date).toLocaleDateString("fr-FR", {
             day: "numeric",
             month: "short",
           }),
-          score: d.score,
-          steps: d.steps,
-          sleep: d.sleep,
-          heartRate: d.heartRate,
+          score: Math.round(d.score),
+          level: d.alert_level,
         })),
       });
     } catch (e) {
@@ -114,8 +117,7 @@ export const useHealthStore = create<HealthState>((set) => ({
   },
 
   submitPhq9: async (answers) => {
-    const pid = getPatientId();
-    if (!pid) throw new Error("Not authenticated");
+    const pid = await resolvePatientId();
     await api.submitPhq9(pid, answers);
   },
 }));
