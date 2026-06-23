@@ -155,8 +155,9 @@ const sections = [
     content: (
       <ul className="list-disc space-y-1.5 pl-5">
         <li>
-          <strong>Chiffrement AES-256</strong> en transit (TLS 1.3) et au repos
-          pour toutes les donnees de sante.
+          <strong>Chiffrement TLS 1.3</strong> en transit pour toutes les
+          communications. Le chiffrement applicatif des champs de sante
+          sensibles au repos est en cours de deploiement.
         </li>
         <li>
           <strong>Authentification JWT</strong> avec tokens a duree de vie
@@ -198,6 +199,11 @@ const sections = [
             </thead>
             <tbody className="divide-y divide-gray-100">
               <tr>
+                <td className="py-2 pr-4">Hetzner Online GmbH</td>
+                <td className="py-2 pr-4">Hebergement et base de donnees</td>
+                <td className="py-2">Allemagne (UE)</td>
+              </tr>
+              <tr>
                 <td className="py-2 pr-4">Anthropic</td>
                 <td className="py-2 pr-4">Coaching IA (API Claude)</td>
                 <td className="py-2">USA</td>
@@ -208,9 +214,9 @@ const sections = [
                 <td className="py-2">USA</td>
               </tr>
               <tr>
-                <td className="py-2 pr-4">AWS / Supabase</td>
-                <td className="py-2 pr-4">Hebergement et base de donnees</td>
-                <td className="py-2">EU (eu-west-1)</td>
+                <td className="py-2 pr-4">Resend</td>
+                <td className="py-2 pr-4">Emails transactionnels</td>
+                <td className="py-2">USA</td>
               </tr>
             </tbody>
           </table>
