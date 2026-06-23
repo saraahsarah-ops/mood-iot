@@ -1,68 +1,95 @@
 """
-Simulateur de patients pour démo / tests Mood-IoT.
+Simulateur de patients pour démo / tests QA Mood-IoT.
 
-Peuple la base avec :
-  - Marie (patiente réelle, liée au compte Keycloak — se connecte sur l'app)
-  - Dr Martin (psychiatre réel, lié au compte Keycloak — se connecte au dashboard)
-  - 4 patients synthétiques (visibles dans le dashboard du médecin)
-  - ~30 jours de daily_aggregates par patient avec des profils variés :
-      * sain        : sommeil/activité stables
-      * à risque    : sommeil court, peu d'activité
-      * EN RECHUTE  : commence normal puis se dégrade (le Z-score le détecte)
-  - baselines + scores calculés via le pipeline réel
+Stratégie « Niveau 1 : même base, tout marqué » :
+  - Marie (PATIENTE RÉELLE) : compte Keycloak + profil + assignation au médecin,
+    mais AUCUNE donnée simulée — ses métriques proviennent des vrais capteurs de
+    son téléphone (Health Connect, source_platform != 'simulator'). Sert à voir
+    le système fonctionner avec des données réelles.
+  - 4 patients DÉMO (@sim.test) : 30 jours de daily_aggregates synthétiques,
+    tous marqués source_platform='simulator' → distinguables et nettoyables.
+  - Dr Martin (psychiatre réel) : voit les 5 patients dans son dashboard.
+
+Tout ce qui est simulé est marqué (source_platform='simulator' + email @sim.test),
+donc `--clean` peut tout retirer sans toucher aux vraies données (Marie, Martin).
 
 Exécution (DANS le conteneur ml-scoring) :
+  # Peupler (Marie réelle + 4 démos)
   docker compose -f docker-compose.prod.yml --env-file .env.prod \
       exec -T ml-scoring python -m qa.simulate_patients
+  # Nettoyer uniquement les données simulées
+  docker compose -f docker-compose.prod.yml --env-file .env.prod \
+      exec -T ml-scoring python -m qa.simulate_patients --clean
+  # Démo sans téléphone : donner aussi des données simulées à Marie
+  docker compose ... exec -T ml-scoring python -m qa.simulate_patients --marie-demo
 """
 
+import argparse
 import asyncio
 import random
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
-from sqlalchemy import select, delete
+from sqlalchemy import delete, select
 
 from src.shared.database import AsyncSessionLocal
 from src.shared.models import (
-    User, Patient, DoctorProfile, PatientPsychiatrist, DailyAggregate,
-    UserRole, Gender,
+    DailyAggregate,
+    DoctorProfile,
+    Gender,
+    Patient,
+    PatientPsychiatrist,
+    User,
+    UserRole,
 )
-from src.scoring.pipeline import get_pipeline
 from src.scoring.main import _compute_and_store_baselines
+from src.scoring.pipeline import get_pipeline
 
 # IDs Keycloak réels (créés précédemment)
 MARIE_KC = "3ba53982-507c-4cc3-9c74-9e3542d35e35"
 MARTIN_KC = "e2d7043a-37ea-4cff-877d-e6b5fe92af5f"
 
+MARTIN_EMAIL = "dr.martin@example.test"
+MARIE_EMAIL = "marie.dupont@example.test"
+
+# Marqueur des données simulées (par opposition aux vrais capteurs téléphone).
+SIM_PLATFORM = "simulator"
+
 N_DAYS = 30
 random.seed(42)
+
+# Patients DÉMO uniquement (synthétiques). Marie est gérée à part (réelle).
+DEMO_ROSTER = [
+    # (email,                  first,   last,      gender,    profile,   dob)
+    ("paul.bernard@sim.test",  "Paul",  "Bernard", Gender.M,  "sain",    date(1988, 7, 5)),
+    ("lea.moreau@sim.test",    "Léa",   "Moreau",  Gender.F,  "risque",  date(2000, 11, 23)),
+    ("hugo.petit@sim.test",    "Hugo",  "Petit",   Gender.M,  "rechute", date(1992, 1, 30)),
+    ("emma.roux@sim.test",     "Emma",  "Roux",    Gender.F,  "neutre",  date(1998, 9, 17)),
+]
 
 
 def _profile_day(profile: str, day_index: int, n_days: int) -> dict:
     """Génère les métriques d'un jour selon le profil clinique."""
-    # progression 0→1 sur la période (pour la rechute)
     t = day_index / max(n_days - 1, 1)
 
     if profile == "sain":
-        sleep = random.gauss(450, 20)        # ~7h30
+        sleep = random.gauss(450, 20)
         quality = random.gauss(80, 5)
         steps = random.gauss(9000, 1200)
     elif profile == "risque":
-        sleep = random.gauss(370, 25)        # ~6h
+        sleep = random.gauss(370, 25)
         quality = random.gauss(58, 8)
         steps = random.gauss(5200, 900)
     elif profile == "rechute":
-        # Normal les 2/3 du temps, puis dégradation marquée sur le dernier tiers
         if t < 0.66:
             sleep = random.gauss(445, 20)
             quality = random.gauss(78, 5)
             steps = random.gauss(8800, 1000)
         else:
-            deg = (t - 0.66) / 0.34          # 0→1 sur le dernier tiers
-            sleep = random.gauss(445 - 130 * deg, 20)   # le sommeil s'effondre
+            deg = (t - 0.66) / 0.34
+            sleep = random.gauss(445 - 130 * deg, 20)
             quality = random.gauss(78 - 35 * deg, 6)
-            steps = random.gauss(8800 - 4500 * deg, 900)  # l'activité chute
+            steps = random.gauss(8800 - 4500 * deg, 900)
     else:  # neutre
         sleep = random.gauss(420, 30)
         quality = random.gauss(70, 8)
@@ -95,7 +122,7 @@ async def _get_or_create_user(db, *, email, role, keycloak_id=None):
     return user
 
 
-async def _create_patient(db, *, user, first, last, gender, profile, dob):
+async def _get_or_create_patient(db, *, user, first, last, gender, dob):
     res = await db.execute(select(Patient).where(Patient.user_id == user.id))
     patient = res.scalar_one_or_none()
     if patient is None:
@@ -107,7 +134,7 @@ async def _create_patient(db, *, user, first, last, gender, profile, dob):
         )
         db.add(patient)
         await db.flush()
-    return patient, profile
+    return patient
 
 
 async def _assign(db, patient_id, psychiatrist_user_id, primary=True):
@@ -127,15 +154,22 @@ async def _assign(db, patient_id, psychiatrist_user_id, primary=True):
 
 
 async def _gen_aggregates(db, patient_id, profile):
-    # Purge éventuelle pour idempotence
-    await db.execute(delete(DailyAggregate).where(DailyAggregate.patient_id == patient_id))
+    """Génère N_DAYS de données SIMULÉES (marquées source_platform='simulator')."""
+    # Purge des seules données simulées de ce patient (idempotence) — ne touche
+    # jamais aux vraies données capteur.
+    await db.execute(
+        delete(DailyAggregate).where(
+            DailyAggregate.patient_id == patient_id,
+            DailyAggregate.source_platform == SIM_PLATFORM,
+        )
+    )
     today = date.today()
     for i in range(N_DAYS):
         d = today - timedelta(days=N_DAYS - 1 - i)
         m = _profile_day(profile, i, N_DAYS)
         db.add(DailyAggregate(
             id=uuid4(), patient_id=patient_id, date=d,
-            source_platform="simulator",
+            source_platform=SIM_PLATFORM,
             synced_at=datetime.now(timezone.utc),
             created_at=datetime.now(timezone.utc),
             **m,
@@ -143,14 +177,33 @@ async def _gen_aggregates(db, patient_id, profile):
     await db.flush()
 
 
-async def main():
+async def _score_patient(db, pipeline, patient_id, label, profile):
+    """Calcule baselines + scores des 3 derniers jours via le pipeline réel."""
+    try:
+        await _compute_and_store_baselines(str(patient_id), db)
+    except Exception as e:  # noqa: BLE001
+        print(f"  baseline {label}: {e}")
+    last = None
+    for back in (2, 1, 0):
+        d = date.today() - timedelta(days=back)
+        try:
+            last = await pipeline.compute_score(str(patient_id), d, db)
+        except Exception as e:  # noqa: BLE001
+            print(f"  score {label} {d}: {e}")
+    if last:
+        print(f"  {label:6s} ({profile:8s}) → score={last['score']:.0f} alert={last['alert_level']}")
+
+
+async def seed(marie_demo: bool) -> None:
+    """Peuple la base : Dr Martin + Marie (réelle) + 4 patients démo."""
     async with AsyncSessionLocal() as db:
         # 1. Dr Martin (psychiatre réel)
         martin_user = await _get_or_create_user(
-            db, email="dr.martin@example.test", role=UserRole.psychiatre,
-            keycloak_id=MARTIN_KC,
+            db, email=MARTIN_EMAIL, role=UserRole.psychiatre, keycloak_id=MARTIN_KC,
         )
-        res = await db.execute(select(DoctorProfile).where(DoctorProfile.user_id == martin_user.id))
+        res = await db.execute(
+            select(DoctorProfile).where(DoctorProfile.user_id == martin_user.id)
+        )
         if res.scalar_one_or_none() is None:
             db.add(DoctorProfile(
                 id=uuid4(), user_id=martin_user.id,
@@ -159,49 +212,89 @@ async def main():
             ))
             await db.flush()
 
-        # 2. Patients : Marie (réelle) + synthétiques
-        roster = [
-            ("marie.dupont@example.test", MARIE_KC, "Marie", "Dupont", Gender.F, "rechute", date(1995, 3, 12)),
-            ("paul.bernard@sim.test",     None,     "Paul", "Bernard", Gender.M, "sain",    date(1988, 7, 5)),
-            ("lea.moreau@sim.test",       None,     "Léa", "Moreau",   Gender.F, "risque",  date(2000, 11, 23)),
-            ("hugo.petit@sim.test",       None,     "Hugo", "Petit",   Gender.M, "rechute", date(1992, 1, 30)),
-            ("emma.roux@sim.test",        None,     "Emma", "Roux",    Gender.F, "neutre",  date(1998, 9, 17)),
-        ]
+        # 2. Marie — PATIENTE RÉELLE : compte + profil + assignation, mais PAS de
+        #    données simulées (ses métriques viennent de son téléphone).
+        marie_user = await _get_or_create_user(
+            db, email=MARIE_EMAIL, role=UserRole.patient, keycloak_id=MARIE_KC,
+        )
+        marie = await _get_or_create_patient(
+            db, user=marie_user, first="Marie", last="Dupont",
+            gender=Gender.F, dob=date(1995, 3, 12),
+        )
+        await _assign(db, marie.id, martin_user.id)
+        if marie_demo:
+            await _gen_aggregates(db, marie.id, "rechute")
 
-        patients = []
-        for email, kc, first, last, gender, profile, dob in roster:
-            role = UserRole.patient
-            user = await _get_or_create_user(db, email=email, role=role, keycloak_id=kc)
-            patient, prof = await _create_patient(
-                db, user=user, first=first, last=last, gender=gender, profile=profile, dob=dob,
+        # 3. Patients DÉMO (synthétiques)
+        demos = []
+        for email, first, last, gender, profile, dob in DEMO_ROSTER:
+            user = await _get_or_create_user(db, email=email, role=UserRole.patient)
+            patient = await _get_or_create_patient(
+                db, user=user, first=first, last=last, gender=gender, dob=dob,
             )
             await _assign(db, patient.id, martin_user.id)
-            await _gen_aggregates(db, patient.id, prof)
-            patients.append((patient, prof, first))
+            await _gen_aggregates(db, patient.id, profile)
+            demos.append((patient, profile, first))
 
         await db.commit()
-        print(f"[OK] {len(patients)} patients + Dr Martin créés, {N_DAYS} jours de données chacun.")
+        marie_note = "avec données démo" if marie_demo else "RÉELLE (capteurs téléphone)"
+        print(f"[OK] Dr Martin + Marie ({marie_note}) + {len(demos)} patients démo créés.")
 
-        # 3. Baselines + scores via le pipeline réel
+        # 4. Scores via le pipeline réel
         pipeline = get_pipeline()
-        for patient, prof, first in patients:
-            try:
-                await _compute_and_store_baselines(str(patient.id), db)
-            except Exception as e:
-                print(f"  baseline {first}: {e}")
-            # Score sur les 3 derniers jours
-            for back in (2, 1, 0):
-                d = date.today() - timedelta(days=back)
-                try:
-                    r = await pipeline.compute_score(str(patient.id), d, db)
-                    if back == 0:
-                        print(f"  {first:6s} ({prof:8s}) → score={r['score']:.0f} alert={r['alert_level']}")
-                except Exception as e:
-                    print(f"  score {first} {d}: {e}")
+        if marie_demo:
+            await _score_patient(db, pipeline, marie.id, "Marie", "rechute")
+            await db.commit()
+        for patient, profile, first in demos:
+            await _score_patient(db, pipeline, patient.id, first, profile)
             await db.commit()
 
         print("[DONE] Simulation terminée.")
 
 
+async def clean() -> None:
+    """Retire UNIQUEMENT les données simulées (jamais Marie/Martin réels)."""
+    async with AsyncSessionLocal() as db:
+        # a) Toutes les daily_aggregates marquées 'simulator' (y compris celles
+        #    données à Marie via --marie-demo).
+        res = await db.execute(
+            delete(DailyAggregate).where(DailyAggregate.source_platform == SIM_PLATFORM)
+        )
+        n_aggr = res.rowcount or 0
+
+        # b) Les patients/users de démo (@sim.test). Supprimer le User cascade
+        #    sur Patient → scores/baselines/feature_vectors/assignations.
+        emails = [r[0] for r in DEMO_ROSTER]
+        res2 = await db.execute(
+            delete(User).where(User.email.in_(emails))
+        )
+        n_users = res2.rowcount or 0
+
+        await db.commit()
+        print(f"[CLEAN] {n_aggr} agrégat(s) simulé(s) supprimé(s), "
+              f"{n_users} patient(s) démo supprimé(s). Marie et Dr Martin conservés.")
+
+
+def _parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Simulateur de patients QA Mood-IoT")
+    p.add_argument(
+        "--clean", action="store_true",
+        help="Retire les données simulées (agrégats + patients démo), garde Marie/Martin.",
+    )
+    p.add_argument(
+        "--marie-demo", action="store_true",
+        help="Donne aussi des données simulées à Marie (démo sans téléphone réel).",
+    )
+    return p.parse_args()
+
+
+def main() -> None:
+    args = _parse_args()
+    if args.clean:
+        asyncio.run(clean())
+    else:
+        asyncio.run(seed(marie_demo=args.marie_demo))
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
