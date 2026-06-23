@@ -1,7 +1,19 @@
 # Guide pas-à-pas — Déployer Mood-IoT sur Oracle Cloud Always Free
 
-> Objectif : un environnement staging **gratuit pour toujours** sur Oracle
-> Cloud, avec `api.mood-iot.fr` (backend) + `auth.mood-iot.fr` (Keycloak) +
+> # ⛔️ DOCUMENT OBSOLÈTE — NE PAS SUIVRE
+> Oracle Cloud a été **abandonné** au profit de **Hetzner**. Le déploiement
+> réel se fait désormais sur Hetzner, et le dashboard est hébergé sur Hetzner
+> (PAS Vercel) pour la souveraineté RGPD.
+>
+> 👉 **Guide à jour : [`HETZNER_SETUP.md`](HETZNER_SETUP.md)**
+>
+> Ce fichier est conservé uniquement pour l'historique. Toutes les infos
+> ci-dessous (Oracle, Vercel) ne reflètent plus l'architecture en production.
+
+---
+
+> Objectif (historique) : un environnement staging **gratuit pour toujours** sur
+> Oracle Cloud, avec `api.mood-iot.fr` (backend) + `auth.mood-iot.fr` (Keycloak) +
 > `dashboard.mood-iot.fr` (Vercel) accessibles depuis n'importe où.
 >
 > **⚠️ Pas de PHI réel ici** — uniquement pour démo, tests, et validation
