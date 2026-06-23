@@ -387,6 +387,26 @@ async def create_patient(
     return _patient_to_response(patient, psych_id, payload.email)
 
 
+@app.get("/patients/me", response_model=PatientResponse)
+async def get_my_patient(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Profil du patient connecté — résout patient.id depuis le JWT.
+
+    Indispensable pour l'app mobile : le client n'a que son user.id, mais les
+    endpoints scoring/historique attendent le patient.id. Doit être déclaré
+    AVANT /patients/{patient_id} pour que le routeur ne prenne pas "me" pour un id.
+    """
+    pid = await _resolve_my_patient_id(db, current_user)
+    result = await db.execute(select(Patient).where(Patient.id == pid))
+    patient = result.scalar_one()
+    psych_id = await _get_primary_psychiatrist(pid, db)
+    email = await _get_patient_email(patient.user_id, db)
+    return _patient_to_response(patient, psych_id, email)
+
+
 @app.get("/patients/{patient_id}", response_model=PatientResponse)
 async def get_patient(
     patient_id: str,
