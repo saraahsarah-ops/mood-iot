@@ -14,6 +14,8 @@ import {
   createPatient,
   updatePatient,
   deletePatient,
+  createTeleconsultSession,
+  getMyProfile,
 } from "@/lib/api";
 
 interface PatientOption {
@@ -69,6 +71,13 @@ export default function FichePatiente() {
   const [formData, setFormData] = useState<NewPatientForm>(EMPTY_FORM);
   const [crudLoading, setCrudLoading] = useState(false);
   const [crudMsg, setCrudMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+
+  // Teleconsultation depuis la fiche (patient pre-selectionne)
+  const [showTeleconsultForm, setShowTeleconsultForm] = useState(false);
+  const [tcDate, setTcDate] = useState("");
+  const [tcDuration, setTcDuration] = useState(30);
+  const [tcReason, setTcReason] = useState("");
+  const [tcLoading, setTcLoading] = useState(false);
 
   function updateField(field: keyof NewPatientForm, value: string) {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -132,6 +141,35 @@ export default function FichePatiente() {
       setCrudMsg({ type: "err", text: msg });
     } finally {
       setCrudLoading(false);
+    }
+  }
+
+  async function handleScheduleTeleconsult(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedId || !tcDate) return;
+    setTcLoading(true);
+    setCrudMsg(null);
+    try {
+      // psychiatre_id = id interne du medecin connecte (cf. /auth/me)
+      const profile = await getMyProfile();
+      await createTeleconsultSession({
+        patient_id: selectedId,
+        psychiatre_id: profile.id,
+        scheduled_at: new Date(tcDate).toISOString(),
+        duration_minutes: tcDuration,
+        reason: tcReason || undefined,
+      });
+      setCrudMsg({ type: "ok", text: "Teleconsultation planifiee" });
+      setShowTeleconsultForm(false);
+      setTcDate("");
+      setTcDuration(30);
+      setTcReason("");
+      setTimeout(() => setCrudMsg(null), 3000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erreur";
+      setCrudMsg({ type: "err", text: msg });
+    } finally {
+      setTcLoading(false);
     }
   }
 
@@ -218,7 +256,7 @@ export default function FichePatiente() {
           setMetrics({
             steps: m.step_count || 0,
             sleep: Math.round(((m.sleep_duration_min || 0) / 60) * 10) / 10,
-            bpm: m.heart_rate_avg || 0,
+            bpm: Math.round(m.heart_rate_avg || 0),
             screen: Math.round(((m.screen_time_min || 0) / 60) * 10) / 10,
           });
           if (m.baselines) {
@@ -236,7 +274,7 @@ export default function FichePatiente() {
 
         // Fetch score history
         try {
-          const h = await getScoreHistory(selectedId, 21);
+          const h = await getScoreHistory(selectedId, 30);
           const scores = (h.scores || []).reverse();
           setChartData(
             scores.map((s: any) => ({
@@ -293,6 +331,12 @@ export default function FichePatiente() {
           </button>
           {selectedId && (
             <>
+              <button
+                onClick={() => { setShowTeleconsultForm(true); setCrudMsg(null); }}
+                className="rounded-xl border border-primary-200 bg-primary-50 px-3 py-2 text-[13px] font-semibold text-primary-600 transition hover:bg-primary-100"
+              >
+                Teleconsultation
+              </button>
               <button
                 onClick={openEdit}
                 className="rounded-xl border border-primary-200 bg-primary-50 px-3 py-2 text-[13px] font-semibold text-primary-600 transition hover:bg-primary-100"
@@ -379,6 +423,35 @@ export default function FichePatiente() {
               <button onClick={handleDelete} disabled={crudLoading} className="rounded-xl bg-red-500 px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-red-600 disabled:opacity-50">{crudLoading ? "Suppression..." : "Supprimer"}</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Teleconsult Modal (planifier depuis la fiche, patient pre-selectionne) */}
+      {showTeleconsultForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <form onSubmit={handleScheduleTeleconsult} className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h3 className="text-[15px] font-bold text-gray-800">Planifier une teleconsultation</h3>
+            <p className="mt-1 text-[13px] text-gray-400">Patient : <span className="font-semibold text-gray-600">{selectedName}</span></p>
+            <div className="mt-4 space-y-3">
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-gray-400">Date et heure *</label>
+                <input type="datetime-local" value={tcDate} onChange={(e) => setTcDate(e.target.value)} required className="w-full rounded-xl border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-[13px] text-gray-700 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20" />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-gray-400">Duree</label>
+                <select value={tcDuration} onChange={(e) => setTcDuration(Number(e.target.value))} className="w-full rounded-xl border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-[13px] text-gray-700 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20">
+                  <option value={30}>30 min</option>
+                  <option value={45}>45 min</option>
+                  <option value={60}>60 min</option>
+                </select>
+              </div>
+              <input type="text" placeholder="Motif (optionnel)" value={tcReason} onChange={(e) => setTcReason(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-[13px] text-gray-700 placeholder-gray-400 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20" />
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setShowTeleconsultForm(false)} className="rounded-xl border border-gray-200 px-4 py-2 text-[13px] font-medium text-gray-600 transition hover:bg-gray-50">Annuler</button>
+              <button type="submit" disabled={tcLoading} className="rounded-xl bg-primary-500 px-5 py-2 text-[13px] font-semibold text-white transition hover:bg-primary-600 disabled:opacity-50">{tcLoading ? "Planification..." : "Planifier"}</button>
+            </div>
+          </form>
         </div>
       )}
 

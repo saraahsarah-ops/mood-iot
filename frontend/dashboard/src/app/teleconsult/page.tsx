@@ -98,7 +98,9 @@ export default function TeleconsultPage() {
     if (patients.length === 0) {
       setPatientsLoading(true);
       try {
-        const res = await getPatients(1, 200);
+        // page_size plafonné à 100 côté backend (Query le=100) — 200 renvoyait
+        // un 422 et laissait la liste vide.
+        const res = await getPatients(1, 100);
         const list = res.patients || [];
         setPatients(list);
       } catch (err) {

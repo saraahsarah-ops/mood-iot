@@ -64,7 +64,7 @@ export default function VueGenerale() {
           const shortName = p.name.split(" ")[0];
           nameMap[p.id] = shortName;
           try {
-            const h = await getScoreHistory(p.id, 21);
+            const h = await getScoreHistory(p.id, 30);
             return { shortName, scores: h.scores || [] };
           } catch {
             return { shortName, scores: [] };
