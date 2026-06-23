@@ -35,6 +35,9 @@ from sqlalchemy import Enum as PgEnum
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+# Champs PHI chiffrés au repos (Fernet, RGPD) — chiffrement transparent.
+from src.shared.encrypted_types import EncryptedText
+
 
 # ---------------------------------------------------------------------------
 # Base declarative
@@ -347,10 +350,10 @@ class Patient(Base):
     gender: Mapped[Optional[Gender]] = mapped_column(
         PgEnum(Gender, name="gender_type", create_type=True), nullable=True
     )
-    diagnosis: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    diagnosis: Mapped[Optional[str]] = mapped_column(EncryptedText, nullable=True)
     treatment_start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     emergency_contact_phone: Mapped[Optional[str]] = mapped_column(
-        String(20), nullable=True
+        EncryptedText, nullable=True
     )
     device_token_fcm: Mapped[Optional[str]] = mapped_column(
         String(500), nullable=True
@@ -485,7 +488,7 @@ class MoodEntry(Base):
     )
     phq9_score: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
     mood_rating: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(EncryptedText, nullable=True)
     submitted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -871,11 +874,11 @@ class SessionNote(Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
     )
-    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    content: Mapped[Optional[str]] = mapped_column(EncryptedText, nullable=True)
     alert_feedback: Mapped[Optional[AlertFeedback]] = mapped_column(
         PgEnum(AlertFeedback, name="alert_feedback", create_type=True), nullable=True
     )
-    treatment_adjustment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    treatment_adjustment: Mapped[Optional[str]] = mapped_column(EncryptedText, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -899,7 +902,7 @@ class Message(Base):
     recipient_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[str] = mapped_column(EncryptedText, nullable=False)
     sent_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -972,15 +975,15 @@ class HumeurEntry(Base):
     )
     # 1 = Très mal ... 7 = Excellent
     emoji_level: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
-    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(EncryptedText, nullable=True)
     # Champs voix (réservés pour Phase 2.5 phase 2)
     audio_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    transcription: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    humeur_globale: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    transcription: Mapped[Optional[str]] = mapped_column(EncryptedText, nullable=True)
+    humeur_globale: Mapped[Optional[str]] = mapped_column(EncryptedText, nullable=True)
     intensite: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
     emotions_detectees: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     mots_cles: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-    resume: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    resume: Mapped[Optional[str]] = mapped_column(EncryptedText, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
