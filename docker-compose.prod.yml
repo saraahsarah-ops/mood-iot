@@ -100,8 +100,14 @@ services:
       KC_METRICS_ENABLED: "false"
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+      # SMTP Resend : le realm référence ${env.RESEND_API_KEY} comme mot de
+      # passe SMTP. Sans cette variable, l'auth SMTP échoue → emails de
+      # vérification non envoyés.
+      RESEND_API_KEY: ${RESEND_API_KEY}
     volumes:
       - ./infrastructure/keycloak/realm-moodiot.json:/opt/keycloak/data/import/realm-moodiot.json:ro
+      # Thèmes personnalisés (login/register brandés Mood-IoT).
+      - ./infrastructure/keycloak/themes:/opt/keycloak/themes:ro
     depends_on:
       postgres:
         condition: service_healthy

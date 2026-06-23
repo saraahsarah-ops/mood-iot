@@ -6,7 +6,7 @@
   "defaultLocale": "fr",
   "supportedLocales": ["fr"],
   "internationalizationEnabled": true,
-  "loginTheme": "keycloak",
+  "loginTheme": "moodiot",
   "emailTheme": "keycloak",
   "sslRequired": "external",
   "registrationAllowed": true,
