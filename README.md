@@ -12,9 +12,20 @@ cd simulateur
 python simulateur.py
 
 ## Lancer le dashboard médecin (dev local)
-Le dashboard se lance seul (pas besoin du backend en local : il pointe vers
-l'API déjà déployée). Le client Keycloak `dashboard-medecin` autorise déjà
-`http://localhost:3000`.
+Deux modes possibles :
+
+- **Mode A (recommandé) — dashboard local + backend déployé.** Le plus simple :
+  pas besoin de lancer le backend. Le dashboard sur `http://localhost:3000`
+  tape l'API et le Keycloak déjà déployés. Fonctionne de bout en bout
+  (login + données) : le client Keycloak `dashboard-medecin` autorise
+  `localhost:3000`, et le CORS du backend déployé autorise aussi
+  `http://localhost:3000`. C'est la config du `.env.example`.
+- **Mode B — tout en local.** Lancer le backend via `docker compose up -d`
+  (à la racine), puis pointer le dashboard vers le local : dans `.env.local`,
+  `NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1` et
+  `AUTH_KEYCLOAK_ISSUER=http://localhost:8080/realms/moodiot`.
+
+Étapes (mode A) :
 
 ```bash
 cd frontend/dashboard
