@@ -21,6 +21,9 @@ import Keycloak from "next-auth/providers/keycloak";
 declare module "next-auth" {
   interface Session {
     accessToken?: string;
+    // id_token Keycloak — utilisé comme id_token_hint pour le logout fédéré
+    // (RP-initiated logout) afin de fermer aussi la session SSO Keycloak.
+    idToken?: string;
     error?: "RefreshAccessTokenError";
     user: {
       id?: string;
@@ -31,6 +34,7 @@ declare module "next-auth" {
   interface JWT {
     accessToken?: string;
     refreshToken?: string;
+    idToken?: string;
     accessTokenExpires?: number;
     roles?: string[];
     error?: "RefreshAccessTokenError";
@@ -41,6 +45,7 @@ declare module "next-auth" {
 interface KeycloakJwt {
   accessToken?: string;
   refreshToken?: string;
+  idToken?: string;
   accessTokenExpires?: number;
   roles?: string[];
   error?: "RefreshAccessTokenError";
@@ -135,6 +140,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           ...token,
           accessToken: account.access_token,
           refreshToken: account.refresh_token,
+          idToken: account.id_token,
           accessTokenExpires: (account.expires_at ?? 0) * 1000,
           roles,
         } as KeycloakJwt;
@@ -151,6 +157,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async session({ session, token }) {
       const kc = token as KeycloakJwt;
       session.accessToken = kc.accessToken;
+      session.idToken = kc.idToken;
       session.error = kc.error;
       session.user.role = pickRole(kc.roles);
       return session;

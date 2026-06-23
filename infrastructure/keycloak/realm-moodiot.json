@@ -100,14 +100,15 @@
       "directAccessGrantsEnabled": false,
       "redirectUris": [
         "http://localhost:3000/api/auth/callback/keycloak",
-        "https://dashboard.moodiot.fr/api/auth/callback/keycloak"
+        "https://dashboard.mood-iot.fr/api/auth/callback/keycloak"
       ],
       "webOrigins": [
         "http://localhost:3000",
-        "https://dashboard.moodiot.fr"
+        "https://dashboard.mood-iot.fr"
       ],
       "attributes": {
-        "pkce.code.challenge.method": "S256"
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://dashboard.mood-iot.fr/login##http://localhost:3000/login"
       },
       "fullScopeAllowed": true,
       "defaultClientScopes": [
