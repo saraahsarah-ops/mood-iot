@@ -26,6 +26,7 @@
         "backgroundColor": "#0288d1"
       },
       "package": "com.moodiot.patient",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.health.READ_HEART_RATE",
         "android.permission.health.READ_STEPS",
@@ -38,6 +39,7 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
+      "expo-notifications",
       [
         "expo-build-properties",
         {

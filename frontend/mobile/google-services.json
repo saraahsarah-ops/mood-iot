@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "17124562443",
+    "project_id": "mood-iot",
+    "storage_bucket": "mood-iot.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:17124562443:android:9ffc2621d9e9d3e376d90e",
+        "android_client_info": {
+          "package_name": "com.moodiot.patient"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDAlcwP55_g_qBoP8eibCA7PVWYPQShgaw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

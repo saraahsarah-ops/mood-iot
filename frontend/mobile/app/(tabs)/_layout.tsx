@@ -9,6 +9,7 @@ import {
   type ConsentValues,
 } from "@/components/ConsentModal";
 import { fetchMyConsents, updateMyConsents } from "@/services/api";
+import { registerForPush } from "@/services/push";
 
 const TAB_COLOR = "#0288d1";
 const TAB_INACTIVE = "#999";
@@ -112,6 +113,11 @@ export default function TabsLayout() {
     const id = setInterval(() => void refreshUnread(), 60000);
     return () => clearInterval(id);
   }, [refreshUnread]);
+
+  // Enregistre le device pour les notifications push (best-effort).
+  useEffect(() => {
+    void registerForPush();
+  }, []);
 
   return (
     <>

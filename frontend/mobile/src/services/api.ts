@@ -140,6 +140,14 @@ export async function getMyPatient(): Promise<MyPatient> {
   return request("/patients/me");
 }
 
+/** Enregistre le token push FCM du device pour le patient connecté. */
+export async function registerDeviceToken(token: string): Promise<void> {
+  await request("/patients/me/device-token", {
+    method: "PUT",
+    body: JSON.stringify({ device_token: token }),
+  });
+}
+
 /* ── Health Data Sync ─────────────────────────── */
 
 export interface HealthDataPayload {
