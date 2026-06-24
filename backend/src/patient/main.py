@@ -709,6 +709,23 @@ async def _get_my_patient_simple(
     return patient
 
 
+class DeviceTokenRequest(BaseModel):
+    device_token: str
+
+
+@app.put("/patients/me/device-token")
+async def update_my_device_token(
+    payload: DeviceTokenRequest,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Enregistre le token push FCM du device du patient connecté."""
+    patient = await _get_my_patient_simple(db, current_user["user_id"])
+    patient.device_token_fcm = payload.device_token or None
+    await db.commit()
+    return {"message": "Token enregistre"}
+
+
 @app.get("/patients/me/consents", response_model=MyConsentsResponse)
 async def my_consents(
     current_user: dict = Depends(get_current_user),
