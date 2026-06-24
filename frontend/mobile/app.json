@@ -58,7 +58,8 @@
           "package": "com.moodiot.patient"
         }
       ],
-      "./plugins/withHealthConnectPermissionUsage"
+      "./plugins/withHealthConnectPermissionUsage",
+      "./plugins/withHealthConnectDelegate"
     ],
     "extra": {
       "router": {
