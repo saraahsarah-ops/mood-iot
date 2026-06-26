@@ -437,6 +437,11 @@ class EscalationEngine:
 
         explications_html = "".join(f"<li>{e}</li>" for e in shap_explanations[:3])
 
+        # Le nom du médecin n'est pas porté par User (il vit dans doctor_profiles).
+        # On reste défensif pour ne pas planter si l'attribut est absent.
+        nom_medecin = getattr(psychiatrist, "last_name", None)
+        salutation = f"Dr. {nom_medecin}" if nom_medecin else "Docteur"
+
         return f"""
         <!DOCTYPE html>
         <html lang="fr">
@@ -446,7 +451,7 @@ class EscalationEngine:
                 <h2 style="margin: 0;">Mood-IoT - {label_niveau} Niveau {level}</h2>
             </div>
             <div style="border: 1px solid #ddd; padding: 20px; border-radius: 0 0 8px 8px;">
-                <p>Bonjour Dr. {psychiatrist.last_name},</p>
+                <p>Bonjour {salutation},</p>
                 <p>Un score de risque <strong>eleve ({score:.0f}/100)</strong> a ete detecte
                    pour votre patient :</p>
                 <table style="width: 100%; border-collapse: collapse; margin: 12px 0;">
