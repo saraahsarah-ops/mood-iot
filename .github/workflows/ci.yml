@@ -105,7 +105,10 @@ jobs:
           JWT_SECRET_KEY: ci-test-secret-32-chars-long-please
           KEYCLOAK_ISSUER: http://fake-keycloak.test/realms/moodiot
           ENVIRONMENT: test
-        run: pytest -v --cov=src --cov-report=xml --cov-report=term-missing
+        # Gate de couverture « ratchet » : la barre monte au fil des lots de
+        # tests. Objectif cible 80% (règle équipe). Actuel ~24% — on interdit
+        # juste de redescendre. À relever à chaque nouveau lot de tests.
+        run: pytest -v --cov=src --cov-report=xml --cov-report=term-missing --cov-fail-under=20
       - uses: codecov/codecov-action@v4
         if: always()
         with:
