@@ -174,13 +174,22 @@ AUTH_KEYCLOAK_ISSUER=http://localhost:8080/realms/moodiot
 ```
 
 > ⚠️ **À propos de la base de données locale :**
-> - Si c'est la **première fois** (`docker compose up`), la BD est créée avec le bon
->   schéma mais **vide**. Pour avoir des patients de test, lance le simulateur :
->   `python qa/simulate_patients.py` (voir le script pour les options).
+>
+> Ceci ne concerne **QUE** cette BD locale de l'Option B, qui contient des
+> **données simulées et jetables** (Hugo, Marie…). Ça **n'a rien à voir avec la
+> base de production** : la prod n'est jamais recréée par ces commandes et elle
+> dispose de **sauvegardes automatiques quotidiennes** (cron à 03h30, rétention
+> 14 jours, dans `/opt/backups/`). En Option A et pour l'app mobile, tu utilises
+> la BD déployée — rien à recréer.
+>
+> - Si c'est la **première fois** (`docker compose up`), la BD locale est créée avec
+>   le bon schéma mais **vide**. Pour avoir des patients de test, lance le
+>   simulateur : `python qa/simulate_patients.py` (voir le script pour les options).
 > - Si tu avais un volume **ancien** et que quelque chose casse avec des
->   colonnes/tables nouvelles, **recrée la BD depuis zéro** :
+>   colonnes/tables nouvelles, **recrée la BD locale depuis zéro** (tu perds
+>   seulement les données de test, on les régénère avec le simulateur) :
 >   ```bash
->   docker compose down -v       # ⚠️ efface les données locales
+>   docker compose down -v       # ⚠️ efface les données LOCALES de test uniquement
 >   docker compose up -d
 >   ```
 
