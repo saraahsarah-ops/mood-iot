@@ -55,8 +55,16 @@ TestSession = (
 
 
 async def _override_get_db():
+    # Reproduit le contrat de get_db (commit en succès, rollback en erreur) :
+    # sans commit, les écritures d'une requête sont annulées et invisibles
+    # pour la requête suivante (lecture après écriture).
     async with TestSession() as session:
-        yield session
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
 def _fake_user(user_id, role, email):
@@ -196,3 +204,36 @@ async def scoring_psy_client(db_ready):
     async with client:
         yield client
     scoring_main.app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def teleconsult_psy_client(db_ready):
+    """Service teleconsult authentifié comme le psychiatre semé."""
+    from src.teleconsult import main as t_main
+
+    client = await _client_for(t_main.app, fake_psychiatre_user)
+    async with client:
+        yield client
+    t_main.app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def notification_psy_client(db_ready):
+    """Service notification authentifié comme le psychiatre semé."""
+    from src.notification import main as n_main
+
+    client = await _client_for(n_main.app, fake_psychiatre_user)
+    async with client:
+        yield client
+    n_main.app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def auth_patient_client(db_ready):
+    """Service auth authentifié comme le patient semé."""
+    from src.auth import main as a_main
+
+    client = await _client_for(a_main.app, fake_patient_user)
+    async with client:
+        yield client
+    a_main.app.dependency_overrides.clear()

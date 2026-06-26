@@ -203,7 +203,7 @@ async def send_notification(
             patient_id=payload.patient_id,
             score=payload.score,
             alert_level=payload.alert_level,
-            risk_score_id=payload.risk_score_id or "",
+            risk_score_id=payload.risk_score_id or None,
             shap_explanations=payload.shap_explanations or [],
             db=db,
         )
