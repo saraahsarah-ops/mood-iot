@@ -254,7 +254,7 @@ async def _notify_session_scheduled(
             patient_id=session.patient_id,
             risk_score_id=None,
             type=NotificationType.rdv_rappel,
-            level=0,
+            level=1,
             channel=NotificationChannel.push_fcm,
             title="Téléconsultation programmée",
             body=(
@@ -265,8 +265,10 @@ async def _notify_session_scheduled(
             status=NotificationStatus.sent,
             sent_at=datetime.now(timezone.utc),
         )
-        db.add(notif)
-        await db.flush()
+        # Savepoint : isole l'insertion pour qu'un échec éventuel n'empoisonne
+        # PAS la transaction de création de session (sinon rollback global).
+        async with db.begin_nested():
+            db.add(notif)
         logger.info(
             "Notification de RDV créée pour le patient %s (session %s)",
             session.patient_id,
