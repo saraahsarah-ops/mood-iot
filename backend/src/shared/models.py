@@ -882,7 +882,11 @@ class SessionNote(Base):
     )
     content: Mapped[Optional[str]] = mapped_column(EncryptedText, nullable=True)
     alert_feedback: Mapped[Optional[AlertFeedback]] = mapped_column(
-        PgEnum(AlertFeedback, name="alert_feedback", create_type=True), nullable=True
+        # Le type enum déployé s'appelle "alert_feedback_type" (cf. colonne
+        # session_notes.alert_feedback). Le nom "alert_feedback" provoquait
+        # "type alert_feedback does not exist" -> 500 à l'ajout d'une note.
+        PgEnum(AlertFeedback, name="alert_feedback_type", create_type=True),
+        nullable=True,
     )
     treatment_adjustment: Mapped[Optional[str]] = mapped_column(EncryptedText, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
