@@ -167,6 +167,12 @@ class User(Base):
     # compatibilité descendante et seront retirées en Phase 2.8.
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     mfa_secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # Contact pour les alertes d'escalade (SMS/appel Twilio, push FCM) — surtout
+    # renseigné pour les psychiatres, destinataires des alertes patient critique.
+    # Sans ces colonnes, l'escalade niveau 2/3 plantait (AttributeError sur
+    # psychiatrist.phone / .device_token_fcm).
+    phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    device_token_fcm: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     registration_status: Mapped[RegistrationStatus] = mapped_column(
         PgEnum(RegistrationStatus, name="registration_status", create_type=True),
