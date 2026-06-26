@@ -31,6 +31,29 @@ class TestPatientMe:
         r = await patient_client.get("/patients/me/messages/unread-count")
         assert r.status_code == 200
 
+    async def test_consentements(self, patient_client):
+        r = await patient_client.get("/patients/me/consents")
+        assert r.status_code == 200
+
+    async def test_rendez_vous(self, patient_client):
+        r = await patient_client.get("/patients/me/appointments")
+        assert r.status_code == 200
+
+
+class TestHumeur:
+    async def test_soumettre_humeur_emoji(self, patient_client):
+        r = await patient_client.post(
+            "/patients/me/humeur/emoji", json={"emoji_level": 5, "note": "ça va"}
+        )
+        assert r.status_code in (200, 201)
+
+    async def test_historique_humeur(self, patient_client):
+        await patient_client.post(
+            "/patients/me/humeur/emoji", json={"emoji_level": 4}
+        )
+        r = await patient_client.get("/patients/me/humeur")
+        assert r.status_code == 200
+
 
 class TestHealthDataSync:
     PAYLOAD = {

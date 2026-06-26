@@ -161,6 +161,17 @@ async def _client_for(app, user_factory):
 
 
 @pytest_asyncio.fixture
+async def patient_psy_client(db_ready):
+    """Service patient vu par le psychiatre semé (lié au patient -> accès OK)."""
+    from src.patient import main as patient_main
+
+    client = await _client_for(patient_main.app, fake_psychiatre_user)
+    async with client:
+        yield client
+    patient_main.app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
 async def doctor_public_client(db_ready):
     """Service doctor sans authentification (ex. POST /doctor/register)."""
     from src.doctor import main as doctor_main
