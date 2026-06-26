@@ -28,10 +28,20 @@ from sqlalchemy.pool import NullPool
 
 from src.shared.auth import get_current_user
 from src.shared.database import get_db
-from src.shared.models import Base, Patient, User, UserRole
+from src.shared.encryption import encrypt_field
+from src.shared.models import (
+    Base,
+    DoctorProfile,
+    Patient,
+    PatientPsychiatrist,
+    User,
+    UserRole,
+)
 
 PATIENT_USER_ID = uuid.UUID("00000000-0000-0000-0000-0000000000a1")
 PATIENT_ID = uuid.UUID("00000000-0000-0000-0000-0000000000a2")
+PSY_USER_ID = uuid.UUID("00000000-0000-0000-0000-0000000000b1")
+ADMIN_USER_ID = uuid.UUID("00000000-0000-0000-0000-0000000000c1")
 
 _DB_URL = os.environ.get("DATABASE_URL", "")
 _async_url = _DB_URL.replace("postgresql://", "postgresql+asyncpg://").split("?sslmode=")[0]
@@ -49,15 +59,27 @@ async def _override_get_db():
         yield session
 
 
-def fake_patient_user():
+def _fake_user(user_id, role, email):
     return {
-        "user_id": str(PATIENT_USER_ID),
-        "keycloak_id": "kc-test-patient",
-        "email": "patient@test.fr",
-        "role": "patient",
-        "roles": ["patient"],
+        "user_id": str(user_id),
+        "keycloak_id": f"kc-test-{role}",
+        "email": email,
+        "role": role,
+        "roles": [role],
         "claims": {},
     }
+
+
+def fake_patient_user():
+    return _fake_user(PATIENT_USER_ID, "patient", "patient@test.fr")
+
+
+def fake_psychiatre_user():
+    return _fake_user(PSY_USER_ID, "psychiatre", "psy@test.fr")
+
+
+def fake_admin_user():
+    return _fake_user(ADMIN_USER_ID, "admin", "admin@test.fr")
 
 
 @pytest_asyncio.fixture
@@ -70,11 +92,33 @@ async def db_ready():
     async with TestSession() as s:
         s.add(User(id=PATIENT_USER_ID, email="patient@test.fr", role=UserRole.patient))
         s.add(
+            User(id=PSY_USER_ID, email="psy@test.fr", role=UserRole.psychiatre)
+        )
+        s.add(User(id=ADMIN_USER_ID, email="admin@test.fr", role=UserRole.admin))
+        s.add(
             Patient(
                 id=PATIENT_ID,
                 user_id=PATIENT_USER_ID,
                 first_name="Test",
                 last_name="Patient",
+            )
+        )
+        s.add(
+            DoctorProfile(
+                user_id=PSY_USER_ID,
+                first_name="Doc",
+                last_name="Test",
+                speciality="Psychiatrie",
+                rpps_number_encrypted=encrypt_field("10101010101"),
+                license_number_encrypted=encrypt_field("LIC-TEST"),
+            )
+        )
+        # Lien patient <-> psychiatre (nécessaire pour l'anti-IDOR du scoring)
+        s.add(
+            PatientPsychiatrist(
+                patient_id=PATIENT_ID,
+                psychiatrist_id=PSY_USER_ID,
+                is_primary=True,
             )
         )
         await s.commit()
@@ -92,3 +136,63 @@ async def patient_client(db_ready):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
     patient_main.app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def db_query(db_ready):
+    """Session de test pour vérifier l'état de la BD dans les assertions."""
+    async with TestSession() as session:
+        yield session
+
+
+async def _client_for(app, user_factory):
+    app.dependency_overrides[get_db] = _override_get_db
+    if user_factory is not None:
+        app.dependency_overrides[get_current_user] = user_factory
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+@pytest_asyncio.fixture
+async def doctor_public_client(db_ready):
+    """Service doctor sans authentification (ex. POST /doctor/register)."""
+    from src.doctor import main as doctor_main
+
+    doctor_main.app.dependency_overrides[get_db] = _override_get_db
+    async with AsyncClient(
+        transport=ASGITransport(app=doctor_main.app), base_url="http://test"
+    ) as client:
+        yield client
+    doctor_main.app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def doctor_psy_client(db_ready):
+    """Service doctor authentifié comme le psychiatre semé."""
+    from src.doctor import main as doctor_main
+
+    client = await _client_for(doctor_main.app, fake_psychiatre_user)
+    async with client:
+        yield client
+    doctor_main.app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def doctor_admin_client(db_ready):
+    """Service doctor authentifié comme admin."""
+    from src.doctor import main as doctor_main
+
+    client = await _client_for(doctor_main.app, fake_admin_user)
+    async with client:
+        yield client
+    doctor_main.app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def scoring_psy_client(db_ready):
+    """Service scoring authentifié comme le psychiatre semé (lié au patient)."""
+    from src.scoring import main as scoring_main
+
+    client = await _client_for(scoring_main.app, fake_psychiatre_user)
+    async with client:
+        yield client
+    scoring_main.app.dependency_overrides.clear()
