@@ -4,6 +4,7 @@ Gestion des sessions de teleconsultation via Jitsi Meet.
 Connecte a PostgreSQL via SQLAlchemy async.
 """
 
+import logging
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
@@ -24,7 +25,14 @@ from src.shared.models import (
     TeleconsultStatus,
     TeleconsultTrigger,
     Message,
+    Notification,
+    NotificationType,
+    NotificationChannel,
+    NotificationStatus,
+    Patient,
 )
+
+logger = logging.getLogger("mood_iot.teleconsult")
 
 # ---------------------------------------------------------------------------
 # Application
@@ -215,6 +223,59 @@ def _session_to_response(s: TeleconsultSession) -> SessionResponse:
 # ---------------------------------------------------------------------------
 
 
+async def _notify_session_scheduled(
+    db: AsyncSession, session: TeleconsultSession
+) -> None:
+    """Crée une notification persistée pour le patient quand une
+    téléconsultation est programmée (visible dans l'app/dashboard + badge).
+
+    Best-effort : un échec ici ne doit jamais interrompre la création de la
+    session (la notification est secondaire).
+    """
+    try:
+        result = await db.execute(
+            select(Patient).where(Patient.id == session.patient_id)
+        )
+        patient = result.scalar_one_or_none()
+        if patient is None:
+            logger.warning(
+                "Patient %s introuvable - notification de RDV ignorée",
+                session.patient_id,
+            )
+            return
+
+        quand = (
+            session.scheduled_at.strftime("%d/%m/%Y à %H:%M")
+            if session.scheduled_at
+            else "prochainement"
+        )
+        lien = _generate_jitsi_url(session.jitsi_room_id)
+        notif = Notification(
+            patient_id=session.patient_id,
+            risk_score_id=None,
+            type=NotificationType.rdv_rappel,
+            level=0,
+            channel=NotificationChannel.push_fcm,
+            title="Téléconsultation programmée",
+            body=(
+                f"Votre téléconsultation est programmée le {quand}. "
+                f"Lien de connexion : {lien}"
+            ),
+            recipient_user_id=patient.user_id,
+            status=NotificationStatus.sent,
+            sent_at=datetime.now(timezone.utc),
+        )
+        db.add(notif)
+        await db.flush()
+        logger.info(
+            "Notification de RDV créée pour le patient %s (session %s)",
+            session.patient_id,
+            session.id,
+        )
+    except Exception:  # noqa: BLE001 - best-effort, on log et on continue
+        logger.exception("Échec de la notification de téléconsultation programmée")
+
+
 @app.post(
     "/teleconsult/sessions",
     response_model=SessionResponse,
@@ -242,6 +303,9 @@ async def create_session(
     )
     db.add(session)
     await db.flush()
+
+    # Notifier le patient que sa téléconsultation est programmée.
+    await _notify_session_scheduled(db, session)
 
     return _session_to_response(session)
 
