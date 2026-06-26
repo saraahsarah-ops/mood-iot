@@ -36,7 +36,7 @@ from src.shared.models import (
 from src.notification.channels import (
     claude_coaching,
     fcm_channel,
-    ses_channel,
+    get_email_channel,
     twilio_channel,
     ws_channel,
 )
@@ -232,7 +232,7 @@ class EscalationEngine:
 
         # --- 4. Email au psychiatre via SES ---
         html_body = self._build_alert_email_html(patient, psychiatrist, score, shap_explanations, level=2)
-        email_ok = await ses_channel.send_email(
+        email_ok = await get_email_channel().send_email(
             to_email=psychiatrist.email or "",
             subject=alerte_titre,
             html_body=html_body,
