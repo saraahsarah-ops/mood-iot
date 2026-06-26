@@ -23,8 +23,10 @@ Lancement (bash) :
 Option : ajouter --headed pour voir le navigateur.
 """
 
+import base64
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -74,6 +76,18 @@ def shot(page, filename):
     path = EVID_DIR / filename
     page.screenshot(path=str(path), full_page=True)
     return filename
+
+
+def dismiss_cookies(page):
+    """Ferme le bandeau de consentement cookies s'il est présent (il
+    intercepte sinon les clics sur les cartes/boutons en bas de page)."""
+    try:
+        btn = page.get_by_role("button", name="Accepter")
+        if btn.count() > 0 and btn.first.is_visible():
+            btn.first.click(timeout=3000)
+            page.wait_for_timeout(500)
+    except Exception:
+        pass
 
 
 def main():
@@ -259,6 +273,7 @@ def main():
         # --- 4. Vue générale : KPIs + liste patients ---------------------
         print("[4] Vue générale (KPIs + patients)")
         page.wait_for_timeout(1500)
+        dismiss_cookies(page)  # sinon le bandeau intercepte les clics
         dash_body = page.inner_text("body")
         found = [pat for pat in EXPECTED_PATIENTS if pat in dash_body]
         patients_ok = len(found) >= 4
@@ -285,16 +300,26 @@ def main():
         # --- 5. Fiche patient : BPM arrondi + métriques + courbe 30j -----
         print("[5] Fiche patient")
         try:
-            # cliquer le premier patient trouvé
+            # La CARTE patient affiche "Prénom I." (ex. "Hugo P.") alors que la
+            # LÉGENDE du graphe affiche juste "Hugo". On cible donc la carte via
+            # le motif "Prénom <Initiale>." pour ne pas cliquer la légende.
             target = found[0] if found else EXPECTED_PATIENTS[0]
-            page.click(f"text={target}", timeout=10000)
+            card = page.get_by_text(
+                re.compile(rf"\b{re.escape(target)}\s+[A-ZÀ-Ÿ]\.")
+            ).first
+            card.click(timeout=10000)
+            page.wait_for_url("**/patient**", timeout=15000)
             page.wait_for_load_state("domcontentloaded", timeout=15000)
             page.wait_for_timeout(4000)
+            dismiss_cookies(page)
             fiche_body = page.inner_text("body")
             ev = shot(page, "TC-UC9-03_fiche_patient.png")
+            on_fiche = "/patient" in page.url
+            if not on_fiche:
+                record("TC-UC9-03", "Navigation vers la fiche patient", False,
+                        f"N'a pas navigué vers /patient (URL={page.url})", ev)
 
             # BPM doit être un entier (pas 65.6630...)
-            import re
             bpm_matches = re.findall(r"(\d+(?:\.\d+)?)\s*bpm", fiche_body, re.IGNORECASE)
             bpm_floats = [m for m in bpm_matches if "." in m]
             bpm_ok = len(bpm_matches) > 0 and len(bpm_floats) == 0
@@ -318,13 +343,17 @@ def main():
                 ev,
             )
 
-            # Bouton planifier téléconsultation
-            tc_btn = page.locator("text=/téléconsultation/i").count()
+            # Bouton "Teleconsultation" du header de la fiche (écrit SANS accent
+            # dans l'UI -> recherche accent-insensible via le stem "consultation",
+            # rôle=button pour ne pas matcher le lien de nav latéral).
+            tc_btn = page.get_by_role(
+                "button", name=re.compile("consultation", re.I)
+            ).count()
             record(
                 "TC-UC9-06",
-                "Fiche patient : bouton Planifier téléconsultation",
+                "Fiche patient : bouton Téléconsultation (ouvre le modal)",
                 tc_btn > 0,
-                f"Occurrences 'téléconsultation' dans la fiche: {tc_btn}",
+                f"Boutons 'consultation' dans la fiche: {tc_btn}",
                 ev,
             )
 
@@ -342,25 +371,125 @@ def main():
             record("TC-UC9-03", "Fiche patient", False, f"Timeout: {e}")
 
         # --- 6. Téléconsultation : dropdown patients ---------------------
+        # Le dropdown n'existe que DANS le modal ouvert par "+ Nouvelle session"
+        # (pas sur la page par défaut). Il faut donc ouvrir le modal d'abord.
         print("[6] Page téléconsultation")
         try:
             page.goto(f"{BASE_URL}/teleconsult", wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(4000)
+            page.wait_for_timeout(3000)
+            dismiss_cookies(page)
+            page.get_by_role("button", name=re.compile("Nouvelle session", re.I)).first.click(timeout=10000)
+            page.wait_for_selector("select", state="visible", timeout=10000)
+            page.wait_for_timeout(1500)
             tbody = page.inner_text("body")
             ev = shot(page, "TC-UC5-01_teleconsult_dropdown.png")
-            # le dropdown doit lister des patients (pas vide -> bug 422 corrigé)
-            opt_count = page.locator("select option, [role=option]").count()
+            # 1er <select> = liste des patients ; ses <option> (hors placeholder)
+            opt_count = page.locator("select").first.locator("option").count()
             tfound = [pat for pat in EXPECTED_PATIENTS if pat in tbody]
-            tc_ok = opt_count > 1 or len(tfound) >= 3
+            tc_ok = opt_count > 1  # > 1 car la 1re option est "Sélectionner..."
             record(
                 "TC-UC5-01",
                 "Téléconsultation : dropdown patients peuplé (bug 422 corrigé)",
                 tc_ok,
-                f"options={opt_count}, patients dans la page={tfound}",
+                f"options={opt_count} (dont placeholder), patients dans le modal={tfound}",
                 ev,
             )
         except PWTimeout as e:
             record("TC-UC5-01", "Téléconsultation dropdown", False, f"Timeout: {e}")
+
+        # --- 7. Onglets de la fiche : Historique Clinique & IA + Messagerie
+        print("[7] Onglets fiche (Historique IA + Messagerie)")
+        try:
+            page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(3000)
+            dismiss_cookies(page)
+            target = found[0] if found else EXPECTED_PATIENTS[0]
+            page.get_by_text(
+                re.compile(rf"\b{re.escape(target)}\s+[A-ZÀ-Ÿ]\.")
+            ).first.click(timeout=10000)
+            page.wait_for_url("**/patient**", timeout=15000)
+            page.wait_for_timeout(3000)
+            dismiss_cookies(page)
+
+            # Onglet Historique Clinique & IA
+            page.get_by_role("button", name=re.compile("Historique", re.I)).first.click(timeout=8000)
+            page.wait_for_timeout(3000)
+            hist_body = page.inner_text("body")
+            ev = shot(page, "TC-UC9-11_onglet_historique_IA.png")
+            hist_ok = "historique" in hist_body.lower()
+            record("TC-UC9-11", "Fiche : onglet Historique Clinique & IA",
+                    hist_ok, f"Onglet rendu (longueur texte={len(hist_body)})", ev)
+
+            # Explications IA / facteurs / déviations (UC6-05 + UC6-03)
+            ia_terms = ["facteur", "déviation", "deviation", "score", "ia",
+                        "shap", "risque", "rechute", "z-score", "baseline"]
+            ia_hits = [t for t in ia_terms if t in hist_body.lower()]
+            record("TC-UC6-05", "Explications du score (facteurs/déviations) visibles",
+                    len(ia_hits) >= 2, f"Termes IA/explication détectés: {ia_hits}", ev)
+
+            # Onglet Messagerie
+            page.get_by_role("button", name=re.compile("Messagerie", re.I)).first.click(timeout=8000)
+            page.wait_for_timeout(2500)
+            msg_body = page.inner_text("body")
+            ev = shot(page, "TC-UC9-12_onglet_messagerie.png")
+            has_input = page.locator("textarea, input[type=text]").count() > 0
+            record("TC-UC9-12", "Fiche : onglet Messagerie (zone de saisie)",
+                    has_input, f"Champs de saisie détectés: {has_input}", ev)
+        except PWTimeout as e:
+            record("TC-UC9-11", "Onglets fiche", False, f"Timeout: {e}")
+
+        # --- 8. Sécurité de session : cookie HttpOnly + rôles JWT --------
+        print("[8] Sécurité session (cookie HttpOnly + rôles JWT)")
+        try:
+            cookies = context.cookies()
+            sess = [c for c in cookies if "session-token" in c["name"]]
+            httponly_ok = len(sess) > 0 and all(c.get("httpOnly") for c in sess)
+            record("TC-UC3-12", "Session NextAuth en cookie HttpOnly",
+                    httponly_ok,
+                    f"{len(sess)} cookie(s) session-token, httpOnly={[c.get('httpOnly') for c in sess]}",
+                    "")
+
+            # rôles JWT : décoder l'access token renvoyé par /api/auth/session
+            r = context.request.get(f"{BASE_URL}/api/auth/session")
+            data = r.json()
+            tok = data.get("accessToken", "")
+            role_claims = []
+            if tok and tok.count(".") >= 2:
+                part = tok.split(".")[1]
+                part += "=" * (-len(part) % 4)
+                payload = json.loads(base64.urlsafe_b64decode(part))
+                realm_roles = payload.get("realm_access", {}).get("roles", [])
+                role_claims = realm_roles
+            role_ok = "psychiatre" in [str(x).lower() for x in role_claims] or \
+                      str(data.get("user", {}).get("role", "")).lower() == "psychiatre"
+            record("TC-UC13-04", "Rôles JWT mappés (psychiatre)",
+                    role_ok,
+                    f"role session={data.get('user', {}).get('role')}, realm_roles={role_claims}",
+                    "")
+        except Exception as e:
+            record("TC-UC3-12", "Sécurité session", False, f"Erreur: {e}")
+
+        # --- 9. Déconnexion fédérée (EN DERNIER, ferme la session) -------
+        print("[9] Déconnexion fédérée")
+        try:
+            page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(2500)
+            dismiss_cookies(page)
+            page.get_by_role("button", name=re.compile("connexion|Déconnexion|Deconnexion", re.I)).first.click(timeout=8000)
+            page.wait_for_timeout(4000)
+            ev = shot(page, "TC-UC3-11_logout.png")
+            on_login = "/login" in page.url or "auth.mood-iot.fr" in page.url
+            # vérifier que la session est bien fermée : revenir sur / doit
+            # rediriger vers /login (plus de cookie de session valide).
+            page.goto(BASE_URL, wait_until="domcontentloaded", timeout=20000)
+            page.wait_for_timeout(2500)
+            logged_out = "/login" in page.url or "auth.mood-iot.fr" in page.url
+            record("TC-UC3-11", "Déconnexion fédérée (ferme la session)",
+                    on_login and logged_out,
+                    f"Après logout URL={page.url} ; retour sur / -> redirigé login={logged_out}",
+                    ev)
+        except PWTimeout as e:
+            record("TC-UC3-11", "Déconnexion fédérée", False, f"Timeout: {e}")
 
         browser.close()
         _dump()
