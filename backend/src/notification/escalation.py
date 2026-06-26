@@ -33,6 +33,8 @@ from src.shared.models import (
     TeleconsultStatus,
     User,
 )
+from urllib.parse import quote
+
 from src.notification.channels import (
     claude_coaching,
     fcm_channel,
@@ -40,6 +42,7 @@ from src.notification.channels import (
     twilio_channel,
     ws_channel,
 )
+from src.shared.config import settings
 
 logger = logging.getLogger("mood_iot.notification.escalation")
 
@@ -442,6 +445,13 @@ class EscalationEngine:
         nom_medecin = getattr(psychiatrist, "last_name", None)
         salutation = f"Dr. {nom_medecin}" if nom_medecin else "Docteur"
 
+        # Lien profond vers la fiche du patient critique dans le dashboard.
+        nom_patient = f"{patient.first_name} {patient.last_name}"
+        dashboard_link = (
+            f"{settings.DASHBOARD_URL.rstrip('/')}/patient"
+            f"?id={patient.id}&name={quote(nom_patient)}"
+        )
+
         return f"""
         <!DOCTYPE html>
         <html lang="fr">
@@ -470,6 +480,14 @@ class EscalationEngine:
                 <ul>{explications_html}</ul>
                 <p>Veuillez consulter le dashboard Mood-IoT pour plus de details et prendre
                    les mesures appropriees.</p>
+                <p style="text-align: center; margin: 24px 0;">
+                    <a href="{dashboard_link}"
+                       style="background: {couleur_niveau}; color: #ffffff; text-decoration: none;
+                              padding: 12px 30px; border-radius: 8px; font-weight: bold;
+                              display: inline-block; font-size: 15px;">
+                        Ouvrir la fiche du patient
+                    </a>
+                </p>
                 <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
                 <p style="font-size: 12px; color: #888;">
                     Cet email a ete genere automatiquement par le systeme Mood-IoT.

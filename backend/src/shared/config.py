@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     SES_FROM_EMAIL: str = "noreply@mood-iot.fr"
     RESEND_API_KEY: str = ""
 
+    # URL publique du dashboard médecin — utilisée pour les liens cliquables
+    # dans les emails d'alerte (le médecin ouvre la fiche du patient critique).
+    DASHBOARD_URL: str = "https://dashboard.mood-iot.fr"
+
     # ── Jitsi ───────────────────────────────────────────────────────────────
     JITSI_SERVER_URL: str = "https://meet.jit.si"
     JITSI_JWT_SECRET: str = "change-me"
