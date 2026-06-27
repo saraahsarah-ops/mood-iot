@@ -106,9 +106,9 @@ jobs:
           KEYCLOAK_ISSUER: http://fake-keycloak.test/realms/moodiot
           ENVIRONMENT: test
         # Gate de couverture « ratchet » : la barre monte au fil des lots de
-        # tests. Objectif cible 80% (règle équipe). Actuel ~55% — on interdit
+        # tests. Objectif cible 80% (règle équipe). Actuel ~58% — on interdit
         # juste de redescendre. À relever à chaque nouveau lot de tests.
-        run: pytest -v --cov=src --cov-report=xml --cov-report=term-missing --cov-fail-under=52
+        run: pytest -v --cov=src --cov-report=xml --cov-report=term-missing --cov-fail-under=55
       - uses: codecov/codecov-action@v4
         if: always()
         with:
