@@ -1,4 +1,4 @@
-import { toPayload } from "./healthSync";
+import { getSupportedPlatform, toPayload } from "./healthSync";
 
 describe("toPayload", () => {
   it("mappe DayMetrics vers le payload backend", () => {
@@ -16,5 +16,11 @@ describe("toPayload", () => {
     expect(p.sleep_duration_min).toBe(430);
     expect(p.step_count).toBe(6500);
     expect(["ios_healthkit", "android_health_connect"]).toContain(p.source_platform);
+  });
+});
+
+describe("getSupportedPlatform", () => {
+  it("retourne une plateforme valide", () => {
+    expect(["android", "ios", "unsupported"]).toContain(getSupportedPlatform());
   });
 });
