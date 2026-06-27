@@ -64,6 +64,8 @@ jobs:
         working-directory: frontend/mobile
       - run: npx tsc --noEmit
         working-directory: frontend/mobile
+      - run: npm test
+        working-directory: frontend/mobile
 
   # ── Tests dashboard (Vitest) ────────────────────────────────────────────
   test-dashboard:
