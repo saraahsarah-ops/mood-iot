@@ -54,3 +54,39 @@ class TestScoringEndpointsAvecDonnees:
         assert r.status_code == 200
         body = r.json()
         assert body.get("total", 0) >= 1 or len(body.get("scores", [])) >= 1
+
+
+from datetime import timedelta  # noqa: E402
+
+
+class TestScoringBaselineEtInterne:
+    async def _seed_aggs(self, db):
+        for i in range(5):
+            db.add(DailyAggregate(
+                patient_id=PATIENT_ID, date=TARGET - timedelta(days=i),
+                heart_rate_avg=70.0 + i, sleep_duration_min=430.0,
+                step_count=6500, screen_time_min=300.0,
+            ))
+        await db.commit()
+
+    async def test_baseline_trigger(self, scoring_psy_client, db_query):
+        await self._seed_aggs(db_query)
+        r = await scoring_psy_client.post(f"/scoring/baseline/{PATIENT_ID}")
+        assert r.status_code in (200, 201)
+
+    async def test_internal_compute_ok(self, scoring_psy_client, db_query):
+        await _seed_score(db_query)  # agrégat + baselines
+        r = await scoring_psy_client.post(
+            f"/scoring/internal/compute/{PATIENT_ID}",
+            headers={"X-Internal-Service": "test-internal-secret"},
+            json={"target_date": TARGET.isoformat()},
+        )
+        assert r.status_code in (200, 201)
+
+    async def test_internal_compute_mauvais_secret_403(self, scoring_psy_client):
+        r = await scoring_psy_client.post(
+            f"/scoring/internal/compute/{PATIENT_ID}",
+            headers={"X-Internal-Service": "mauvais-secret"},
+            json={"target_date": TARGET.isoformat()},
+        )
+        assert r.status_code == 403

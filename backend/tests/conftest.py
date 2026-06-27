@@ -19,6 +19,9 @@ import uuid
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("ENCRYPTION_KEY", "zZ8kQwManbY9X4n2pV6cR3tL1sH7jD0fG5wE8uA2bN4=")
 os.environ.setdefault("JWT_SECRET_KEY", "ci-test-secret-32-chars-long-please")
+# Forcé (pas setdefault) : l'image conteneur peut déjà avoir une valeur ;
+# on impose la nôtre pour tester le endpoint interne /scoring/internal/compute.
+os.environ["INTERNAL_SERVICE_SECRET"] = "test-internal-secret"
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
