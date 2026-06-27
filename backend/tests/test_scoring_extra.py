@@ -107,3 +107,42 @@ class TestScoringBaselineUpsert:
         await db_query.commit()
         r = await scoring_psy_client.post(f"/scoring/baseline/{PATIENT_ID}")
         assert r.status_code in (200, 201)
+
+
+class TestScoringInternalAlerte:
+    async def test_internal_recent_extreme_genere_alerte(
+        self, scoring_psy_client, db_query
+    ):
+        # Compute interne, date du jour, données extrêmes -> alerte (branche
+        # _create_alert_notification dans le chemin interne).
+        today = date.today()
+        db_query.add(
+            DailyAggregate(
+                patient_id=PATIENT_ID,
+                date=today,
+                heart_rate_avg=155.0,
+                heart_rate_variability=5.0,
+                sleep_duration_min=100.0,
+                sleep_quality_score=5.0,
+                step_count=200,
+                screen_time_min=950.0,
+            )
+        )
+        for name, mean, std in _BASELINES:
+            db_query.add(
+                Baseline(
+                    patient_id=PATIENT_ID,
+                    metric_name=name,
+                    mean_value=mean,
+                    std_value=std,
+                    sample_count=30,
+                )
+            )
+        await db_query.commit()
+        r = await scoring_psy_client.post(
+            f"/scoring/internal/compute/{PATIENT_ID}",
+            headers={"X-Internal-Service": "test-internal-secret"},
+            json={"target_date": today.isoformat()},
+        )
+        assert r.status_code == 200
+        assert r.json()["status"] == "scored"

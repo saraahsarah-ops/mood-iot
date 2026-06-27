@@ -87,6 +87,21 @@ class TestDoctorApprobation:
         )
         assert r.status_code == 200
 
+    async def test_rejeter_introuvable(self, doctor_admin_client):
+        r = await doctor_admin_client.put(
+            f"/doctor/{uuid.uuid4()}/reject", json={"reason": "x"}
+        )
+        assert r.status_code == 404
+
+    async def test_rejeter_deja_traite_400(self, doctor_admin_client, db_query):
+        uid = await _seed_pending(db_query)
+        ok = await doctor_admin_client.put(f"/doctor/{uid}/approve")
+        assert ok.status_code == 200
+        again = await doctor_admin_client.put(
+            f"/doctor/{uid}/reject", json={"reason": "x"}
+        )
+        assert again.status_code == 400
+
 
 class TestDoctorInstitution:
     async def test_membres_sans_institution_400(self, doctor_admin_client):
@@ -113,6 +128,38 @@ class TestDoctorInstitution:
             },
         )
         assert r.status_code == 201
+
+    async def test_ajouter_membre_sans_institution_400(self, doctor_admin_client):
+        # Admin sans institution -> 400 (garde avant toute création).
+        r = await doctor_admin_client.post(
+            "/doctor/institution/members",
+            json={
+                "email": "x@clinique.fr",
+                "password": "Membre2026!",
+                "first_name": "X",
+                "last_name": "Y",
+                "rpps_number": "99999999999",
+                "license_number": "LIC-X",
+            },
+        )
+        assert r.status_code == 400
+
+    async def test_ajouter_membre_mdp_faible_400(self, doctor_admin_client, db_query):
+        # Mot de passe assez long pour passer Pydantic mais sans majuscule/chiffre/
+        # caractère spécial -> rejet par validate_password_strength (400).
+        await _attach_institution(db_query)
+        r = await doctor_admin_client.post(
+            "/doctor/institution/members",
+            json={
+                "email": "faible@clinique.fr",
+                "password": "faiblefaible",
+                "first_name": "X",
+                "last_name": "Y",
+                "rpps_number": "88888888888",
+                "license_number": "LIC-F",
+            },
+        )
+        assert r.status_code == 400
 
     async def test_ajouter_membre_email_existant_409(self, doctor_admin_client, db_query):
         await _attach_institution(db_query)
@@ -142,3 +189,10 @@ class TestDoctorInstitution:
             f"/doctor/institution/members/{ADMIN_USER_ID}"
         )
         assert r.status_code == 400
+
+    async def test_retirer_introuvable_404(self, doctor_admin_client, db_query):
+        await _attach_institution(db_query)
+        r = await doctor_admin_client.delete(
+            f"/doctor/institution/members/{uuid.uuid4()}"
+        )
+        assert r.status_code == 404
