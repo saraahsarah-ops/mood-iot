@@ -80,7 +80,7 @@ jobs:
           cache-dependency-path: frontend/dashboard/package-lock.json
       - run: npm ci
         working-directory: frontend/dashboard
-      - run: npm run test
+      - run: npm run test:coverage
         working-directory: frontend/dashboard
 
   # ── 2. Tests backend ────────────────────────────────────────────────────
