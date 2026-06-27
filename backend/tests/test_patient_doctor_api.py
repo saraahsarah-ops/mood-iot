@@ -47,3 +47,30 @@ class TestAntiIdorMedecin:
         autre = uuid.uuid4()
         r = await patient_psy_client.get(f"/patients/{autre}")
         assert r.status_code in (403, 404)
+
+
+class TestPatientCrudPlus:
+    GENDER_OK = {
+        "first_name": "Nouveau", "last_name": "Patient",
+        "date_of_birth": "1990-05-15", "gender": "female",
+        "email": "nouveau.patient@example.fr",
+    }
+
+    async def test_creer_patient(self, patient_psy_client):
+        # gender attendu par l'API = male/female/other (mappé en M/F/autre).
+        r = await patient_psy_client.post("/patients", json=self.GENDER_OK)
+        assert r.status_code in (200, 201)
+
+    async def test_supprimer_patient(self, patient_psy_client):
+        c = await patient_psy_client.post("/patients", json=self.GENDER_OK)
+        pid = c.json()["id"]
+        r = await patient_psy_client.delete(f"/patients/{pid}")
+        assert r.status_code in (200, 204)
+
+    async def test_anonymisation_rgpd_admin(self, patient_admin_client):
+        # L'admin crée (autorisé) puis anonymise (admin only) — un seul client
+        # pour éviter le conflit d'override sur la même app.
+        c = await patient_admin_client.post("/patients", json=self.GENDER_OK)
+        pid = c.json()["id"]
+        r = await patient_admin_client.delete(f"/patients/{pid}/data-anonymize")
+        assert r.status_code in (200, 204)

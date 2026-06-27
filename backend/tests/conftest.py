@@ -218,6 +218,17 @@ async def scoring_psy_client(db_ready):
 
 
 @pytest_asyncio.fixture
+async def patient_admin_client(db_ready):
+    """Service patient vu par un admin (pour les endpoints require_role admin)."""
+    from src.patient import main as patient_main
+
+    client = await _client_for(patient_main.app, fake_admin_user)
+    async with client:
+        yield client
+    patient_main.app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
 async def teleconsult_psy_client(db_ready):
     """Service teleconsult authentifié comme le psychiatre semé."""
     from src.teleconsult import main as t_main
