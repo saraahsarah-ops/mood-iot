@@ -74,3 +74,14 @@ class TestPatientCrudPlus:
         pid = c.json()["id"]
         r = await patient_admin_client.delete(f"/patients/{pid}/data-anonymize")
         assert r.status_code in (200, 204)
+
+
+class TestMoodEntry:
+    PID = "00000000-0000-0000-0000-0000000000a2"
+
+    async def test_soumettre_phq9(self, patient_psy_client):
+        r = await patient_psy_client.post(
+            f"/patients/{self.PID}/mood",
+            json={"phq9_scores": [2, 1, 2, 0, 1, 2, 1, 0, 1], "sleep_hours": 7.0},
+        )
+        assert r.status_code in (200, 201, 403)

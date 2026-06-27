@@ -54,3 +54,18 @@ class TestTeleconsultCycle:
             f"/teleconsult/messages/{PATIENT_ID}", json={"content": "Bonjour"}
         )
         assert r.status_code in (200, 201)
+
+
+class TestTeleconsultJoinDelete:
+    async def test_rejoindre_session(self, teleconsult_psy_client):
+        c = await teleconsult_psy_client.post("/teleconsult/sessions", json=SESSION)
+        sid = c.json()["id"]
+        r = await teleconsult_psy_client.post(f"/teleconsult/sessions/{sid}/join")
+        # 200 si rejoignable, 400 si hors fenêtre horaire, 404 sinon
+        assert r.status_code in (200, 400, 404)
+
+    async def test_supprimer_session(self, teleconsult_psy_client):
+        c = await teleconsult_psy_client.post("/teleconsult/sessions", json=SESSION)
+        sid = c.json()["id"]
+        r = await teleconsult_psy_client.delete(f"/teleconsult/sessions/{sid}")
+        assert r.status_code in (200, 204)
