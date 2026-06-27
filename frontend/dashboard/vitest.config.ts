@@ -20,7 +20,7 @@ export default defineConfig({
       exclude: ["**/*.test.{ts,tsx}"],
       reporter: ["text", "text-summary"],
       // Gate « ratchet » : on interdit de redescendre. À relever à chaque lot.
-      thresholds: { statements: 44, lines: 44 },
+      thresholds: { statements: 64, lines: 64 },
     },
   },
   resolve: {
