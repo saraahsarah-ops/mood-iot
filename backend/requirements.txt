@@ -11,6 +11,7 @@ pydantic-settings==2.*
 
 # ── Base de données ────────────────────────────────────────────────────────
 sqlalchemy==2.*
+greenlet>=3.0  # requis pour async SQLAlchemy + couverture async (cf .coveragerc)
 asyncpg==0.30.*
 alembic==1.14.*
 psycopg2-binary==2.9.*

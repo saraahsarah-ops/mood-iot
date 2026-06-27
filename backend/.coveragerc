@@ -1,0 +1,23 @@
+# Configuration de couverture (coverage.py).
+#
+# IMPORTANT — `concurrency = thread,greenlet` :
+# Les tests d'intégration appellent les apps FastAPI via httpx ASGITransport,
+# qui exécute les handlers `async def` dans un contexte anyio/greenlet. Sans ce
+# réglage, le traceur par défaut de coverage NE SUIT PAS l'exécution des corps
+# de handlers async -> la couverture était massivement sous-comptée (ex.
+# patient/main mesuré à 50% alors qu'il est réellement à 86%).
+# greenlet est déjà une dépendance transitive de SQLAlchemy 2.x (async).
+[run]
+concurrency = thread,greenlet
+source = src
+omit =
+    */tests/*
+    */__pycache__/*
+    src/*/migrations/*
+
+[report]
+show_missing = true
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+    raise NotImplementedError
