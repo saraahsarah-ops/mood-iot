@@ -175,7 +175,10 @@ def _generate_jitsi_url(room_name: str) -> str:
 def _generate_jitsi_jwt(room_name: str, user_id: str, role: str) -> str:
     """Generate a JWT token for Jitsi authentication."""
     import time
-    from jose import jwt as jose_jwt
+
+    # PyJWT (déjà dans requirements.txt + déployé) au lieu de python-jose
+    # qui n'est PAS une dépendance -> crash à l'exécution (join) sinon.
+    import jwt as pyjwt
 
     now = int(time.time())
     payload = {
@@ -194,7 +197,7 @@ def _generate_jitsi_jwt(room_name: str, user_id: str, role: str) -> str:
         },
         "moderator": role == "psychiatre",
     }
-    return jose_jwt.encode(payload, settings.JITSI_JWT_SECRET, algorithm="HS256")
+    return pyjwt.encode(payload, settings.JITSI_JWT_SECRET, algorithm="HS256")
 
 
 def _session_to_response(s: TeleconsultSession) -> SessionResponse:
