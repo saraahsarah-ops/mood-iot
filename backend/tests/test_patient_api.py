@@ -77,3 +77,38 @@ class TestHealthDataSync:
             "/patients/me/health-data", json={**self.PAYLOAD, "step_count": 9000}
         )
         assert r2.status_code in (200, 201)
+
+
+class TestPatientMore:
+    PATIENT_ID = "00000000-0000-0000-0000-0000000000a2"
+
+    async def test_maj_consentements(self, patient_client):
+        r = await patient_client.put(
+            "/patients/me/consents",
+            json={"cgu": True, "rgpd": True, "health_sensors": True, "ai_recommendations": False},
+        )
+        assert r.status_code == 200
+
+    async def test_editer_derniere_humeur(self, patient_client):
+        await patient_client.post("/patients/me/humeur/emoji", json={"emoji_level": 4})
+        r = await patient_client.patch("/patients/me/humeur/latest", json={"emoji_level": 6})
+        assert r.status_code in (200, 404)
+
+    async def test_supprimer_derniere_humeur(self, patient_client):
+        await patient_client.post("/patients/me/humeur/emoji", json={"emoji_level": 3})
+        r = await patient_client.delete("/patients/me/humeur/latest")
+        assert r.status_code in (200, 204, 404)
+
+    async def test_get_son_propre_profil_par_id(self, patient_client):
+        r = await patient_client.get(f"/patients/{self.PATIENT_ID}")
+        assert r.status_code == 200
+
+    async def test_get_patient_inexistant_404(self, patient_client):
+        r = await patient_client.get("/patients/11111111-1111-1111-1111-111111111111")
+        assert r.status_code == 404
+
+    async def test_marquer_message_inexistant_404(self, patient_client):
+        r = await patient_client.patch(
+            "/patients/me/messages/11111111-1111-1111-1111-111111111111/read"
+        )
+        assert r.status_code == 404
