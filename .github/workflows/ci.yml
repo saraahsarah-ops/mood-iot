@@ -65,6 +65,22 @@ jobs:
       - run: npx tsc --noEmit
         working-directory: frontend/mobile
 
+  # ── Tests dashboard (Vitest) ────────────────────────────────────────────
+  test-dashboard:
+    name: Tests dashboard (vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/dashboard/package-lock.json
+      - run: npm ci
+        working-directory: frontend/dashboard
+      - run: npm run test
+        working-directory: frontend/dashboard
+
   # ── 2. Tests backend ────────────────────────────────────────────────────
   test-backend:
     name: Tests backend (pytest)
