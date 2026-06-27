@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<permissions>
+  <uses-permission name="android.permission.health.READ_STEPS" />
+  <uses-permission name="android.permission.health.READ_SLEEP" />
+  <uses-permission name="android.permission.health.READ_HEART_RATE" />
+  <uses-permission name="android.permission.health.READ_TOTAL_CALORIES_BURNED" />
+</permissions>
