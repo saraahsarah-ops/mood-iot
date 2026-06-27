@@ -124,12 +124,12 @@ jobs:
           KEYCLOAK_ISSUER: http://fake-keycloak.test/realms/moodiot
           ENVIRONMENT: test
         # Gate de couverture « ratchet » : la barre monte au fil des lots de
-        # tests. Objectif cible 80% (règle équipe). Actuel 76% — on interdit
+        # tests. Objectif cible 80% (règle équipe). Actuel 78% — on interdit
         # juste de redescendre. À relever à chaque nouveau lot de tests.
         # NB : .coveragerc (auto-découvert) active concurrency=thread,greenlet,
         # sans quoi les handlers async (httpx ASGITransport) ne sont pas tracés
         # et la couverture est sous-comptée (~60% au lieu de 72%).
-        run: pytest -v --cov=src --cov-report=xml --cov-report=term-missing --cov-fail-under=74
+        run: pytest -v --cov=src --cov-report=xml --cov-report=term-missing --cov-fail-under=76
       - uses: codecov/codecov-action@v4
         if: always()
         with:

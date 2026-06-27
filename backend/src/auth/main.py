@@ -251,8 +251,10 @@ async def register_profile(
                 rpps_number_encrypted=payload.rpps_number or "",
                 license_number_encrypted=payload.license_number or "",
                 speciality=payload.speciality or "",
-                approval_status=RegistrationStatus.pending_approval,
             )
+            # NB : l'état d'approbation du médecin est porté par
+            # User.registration_status (réglé ci-dessus), pas par DoctorProfile
+            # qui n'a pas de colonne `approval_status`.
             db.add(doctor)
 
     await log_action(
