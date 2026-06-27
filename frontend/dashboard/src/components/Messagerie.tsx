@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { getPatientHistory, sendDirectMessage } from "@/lib/api";
+import { getPatientHistory, sendDirectMessage, getMyProfile } from "@/lib/api";
 
 interface MessagerieProps {
   patientId: string;
@@ -11,6 +11,15 @@ export default function Messagerie({ patientId }: MessagerieProps) {
   const [messages, setMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [sending, setSending] = useState(false);
+  // id interne du médecin connecté (= sender_id de SES messages). Sert à
+  // aligner les bulles : ses messages à droite, ceux du patient à gauche.
+  const [myUserId, setMyUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    getMyProfile()
+      .then((p) => setMyUserId(p.id))
+      .catch((err) => console.error("Erreur profil médecin:", err));
+  }, []);
 
   async function loadMessages() {
     try {
@@ -58,7 +67,10 @@ export default function Messagerie({ patientId }: MessagerieProps) {
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length > 0 ? (
           messages.map((msg, idx) => {
-            const isMe = msg.sender_id !== patientId; // Assuming current user is doctor if it's not the patient's ID
+            // « moi » = le médecin connecté. On compare au vrai id interne du
+            // médecin (sender_id et myUserId sont des User.id), pas au patientId
+            // qui est un Patient.id -> l'ancienne comparaison était toujours vraie.
+            const isMe = myUserId != null && String(msg.sender_id) === String(myUserId);
             return (
               <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
                 <div className={`max-w-[70%] rounded-2xl px-4 py-2 ${isMe ? 'bg-primary-500 text-white rounded-br-none' : 'bg-gray-100 text-gray-800 rounded-bl-none'}`}>
