@@ -2,8 +2,8 @@
 
 Les canaux externes (Twilio/FCM/email) n'ont pas de credentials en test :
 ils échouent proprement (False) sans rien envoyer. On vérifie le secret,
-le court-circuit niveau 0, et les cascades niveau 2 / niveau 3 (qui créent
-notifications + auto-téléconsultation + avis patient).
+le coaching de renforcement niveau 0, et les cascades niveau 2 / niveau 3
+(qui créent notifications + auto-téléconsultation + avis patient).
 """
 PATIENT_ID = "00000000-0000-0000-0000-0000000000a2"
 SECRET = {"X-Internal-Service": "test-internal-secret"}
@@ -17,14 +17,18 @@ class TestInternalEscalate:
         )
         assert r.status_code == 403
 
-    async def test_niveau_0_court_circuite(self, notification_psy_client):
+    async def test_niveau_0_coaching_renforcement(self, notification_psy_client):
+        # Le niveau 0 (stable) n'est plus court-circuité : le patient reçoit un
+        # coaching IA de renforcement positif (pas d'alerte au psychiatre).
         r = await notification_psy_client.post(
             "/notifications/internal/escalate",
             headers=SECRET,
             json={"patient_id": PATIENT_ID, "score": 10, "alert_level": 0},
         )
         assert r.status_code == 200
-        assert r.json()["status"] == "skipped"
+        body = r.json()
+        assert body["status"] == "escalated"
+        assert "claude_coaching" in body["channels_used"]
 
     async def test_escalade_niveau_2(self, notification_psy_client):
         r = await notification_psy_client.post(
