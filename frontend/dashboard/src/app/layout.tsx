@@ -34,7 +34,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           name="description"
           content="Plateforme française de suivi du bien-être. Tableau de bord médecin pour la téléconsultation et la prévention des rechutes dépressives."
         />
-        <meta name="theme-color" content="#0288d1" />
+        <meta name="theme-color" content="#22c55e" />
         <meta name="application-name" content="Mood-IoT" />
         <link rel="icon" href="/favicon.ico" sizes="any" />
         <link rel="icon" href="/icon-192.png" type="image/png" sizes="192x192" />

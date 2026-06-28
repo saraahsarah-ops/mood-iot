@@ -33,7 +33,7 @@ export default function CompleteDoctorProfilePage() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#f4f6fb]">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#0288d1] border-t-transparent" />
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#22c55e] border-t-transparent" />
           <p className="text-[13px] text-gray-500">Vérification de la session…</p>
         </div>
       </div>
@@ -56,7 +56,7 @@ export default function CompleteDoctorProfilePage() {
           </p>
           <a
             href="/register/doctor"
-            className="inline-flex items-center justify-center rounded-lg bg-[#0288d1] px-4 py-2 text-sm font-semibold text-white hover:bg-[#0277bd]"
+            className="inline-flex items-center justify-center rounded-lg bg-[#22c55e] px-4 py-2 text-sm font-semibold text-white hover:bg-[#16a34a]"
           >
             Créer mon compte
           </a>
@@ -128,7 +128,7 @@ export default function CompleteDoctorProfilePage() {
         animate={{ opacity: 1, y: 0 }}
         className="w-full max-w-md rounded-2xl bg-white p-10 shadow"
       >
-        <h1 className="text-xl font-bold text-[#0288d1] mb-1">
+        <h1 className="text-xl font-bold text-[#22c55e] mb-1">
           Informations professionnelles
         </h1>
         <p className="text-sm text-gray-500 mb-6">
@@ -184,7 +184,7 @@ export default function CompleteDoctorProfilePage() {
         <button
           type="submit"
           disabled={!isValid || loading}
-          className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-[#0288d1] px-4 py-3 text-sm font-semibold text-white shadow hover:bg-[#0277bd] disabled:cursor-not-allowed disabled:opacity-60"
+          className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-[#22c55e] px-4 py-3 text-sm font-semibold text-white shadow hover:bg-[#16a34a] disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loading ? "Création…" : "Soumettre mon inscription"}
         </button>
@@ -228,7 +228,7 @@ function Field({
         placeholder={placeholder}
         inputMode={inputMode}
         pattern={pattern}
-        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-[#0288d1] focus:outline-none focus:ring-2 focus:ring-[#0288d1]/20"
+        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-[#22c55e] focus:outline-none focus:ring-2 focus:ring-[#22c55e]/20"
       />
       {hint && <p className="mt-1 text-[11px] text-gray-400">{hint}</p>}
     </label>

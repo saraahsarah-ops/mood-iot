@@ -77,13 +77,13 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen bg-[#f4f6fb]">
       {/* ── Gauche : présentation Mood-IoT (carrousel) — masqué sur mobile ── */}
-      <aside className="relative hidden w-1/2 flex-col justify-between overflow-hidden bg-gradient-to-br from-[#0288d1] via-[#0277bd] to-[#01486f] p-12 text-white lg:flex">
+      <aside className="relative hidden w-1/2 flex-col justify-between overflow-hidden bg-gradient-to-br from-[#22c55e] via-[#16a34a] to-[#14532d] p-12 text-white lg:flex">
         {/* halos décoratifs */}
         <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-white/10 blur-2xl" />
         <div className="pointer-events-none absolute -bottom-20 -left-16 h-64 w-64 rounded-full bg-white/10 blur-2xl" />
 
         <div className="relative flex items-center gap-2">
-          <span className="text-3xl">💙</span>
+          <span className="text-3xl">💚</span>
           <span className="text-xl font-bold tracking-tight">Mood-IoT</span>
         </div>
 
@@ -131,8 +131,8 @@ export default function LoginPage() {
           className="w-full max-w-md rounded-2xl bg-white p-10 shadow-[0_4px_24px_rgba(0,0,0,0.06)]"
         >
           <div className="mb-8 flex flex-col items-center gap-2">
-            <div className="text-4xl lg:hidden">💙</div>
-            <h1 className="text-2xl font-bold text-[#0288d1]">Mood-IoT</h1>
+            <div className="text-4xl lg:hidden">💚</div>
+            <h1 className="text-2xl font-bold text-[#22c55e]">Mood-IoT</h1>
             <p className="text-sm text-gray-500">Dashboard médecin</p>
           </div>
 
@@ -149,7 +149,7 @@ export default function LoginPage() {
             type="button"
             onClick={() => void login()}
             disabled={loading}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#0288d1] px-4 py-3 text-sm font-semibold text-white shadow transition hover:bg-[#0277bd] disabled:opacity-60"
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#22c55e] px-4 py-3 text-sm font-semibold text-white shadow transition hover:bg-[#16a34a] disabled:opacity-60"
           >
             {loading ? (
               <>
@@ -172,7 +172,7 @@ export default function LoginPage() {
             Pas encore de compte ?{" "}
             <Link
               href="/register/doctor"
-              className="font-semibold text-[#0288d1] hover:underline"
+              className="font-semibold text-[#22c55e] hover:underline"
             >
               S&apos;inscrire en tant que psychiatre
             </Link>

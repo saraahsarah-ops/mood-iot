@@ -19,7 +19,7 @@ interface ScoreChartProps {
   height?: number;
 }
 
-const COLORS = ["#0288d1", "#e74c3c", "#2ecc71", "#9b59b6", "#f39c12"];
+const COLORS = ["#22c55e", "#e74c3c", "#2ecc71", "#9b59b6", "#f39c12"];
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload) return null;
@@ -99,8 +99,8 @@ export default function ScoreChart({ data, patients, height = 300 }: ScoreChartP
       <AreaChart data={data}>
         <defs>
           <linearGradient id="scoreGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#0288d1" stopOpacity={0.15} />
-            <stop offset="100%" stopColor="#0288d1" stopOpacity={0} />
+            <stop offset="0%" stopColor="#22c55e" stopOpacity={0.15} />
+            <stop offset="100%" stopColor="#22c55e" stopOpacity={0} />
           </linearGradient>
         </defs>
         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
@@ -124,11 +124,11 @@ export default function ScoreChart({ data, patients, height = 300 }: ScoreChartP
         <Area
           type="monotone"
           dataKey="score"
-          stroke="#0288d1"
+          stroke="#22c55e"
           strokeWidth={2.5}
           fill="url(#scoreGradient)"
-          dot={{ r: 3, fill: "#0288d1", strokeWidth: 0 }}
-          activeDot={{ r: 5, strokeWidth: 2, fill: "#fff", stroke: "#0288d1" }}
+          dot={{ r: 3, fill: "#22c55e", strokeWidth: 0 }}
+          activeDot={{ r: 5, strokeWidth: 2, fill: "#fff", stroke: "#22c55e" }}
         />
       </AreaChart>
     </ResponsiveContainer>

@@ -32,7 +32,7 @@ export default function DoctorRegisterPage() {
       >
         <div className="mb-8 flex flex-col items-center gap-2">
           <div className="text-4xl">🩺</div>
-          <h1 className="text-2xl font-bold text-[#0288d1]">
+          <h1 className="text-2xl font-bold text-[#22c55e]">
             Inscription psychiatre
           </h1>
           <p className="text-sm text-gray-500 text-center">
@@ -53,7 +53,7 @@ export default function DoctorRegisterPage() {
           type="button"
           onClick={() => void login()}
           disabled={loading}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#0288d1] px-4 py-3 text-sm font-semibold text-white shadow transition hover:bg-[#0277bd] disabled:opacity-60"
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#22c55e] px-4 py-3 text-sm font-semibold text-white shadow transition hover:bg-[#16a34a] disabled:opacity-60"
         >
           {loading ? (
             <>
@@ -75,7 +75,7 @@ export default function DoctorRegisterPage() {
           Déjà inscrit ?{" "}
           <Link
             href="/login"
-            className="font-semibold text-[#0288d1] hover:underline"
+            className="font-semibold text-[#22c55e] hover:underline"
           >
             Se connecter
           </Link>
