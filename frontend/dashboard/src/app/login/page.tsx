@@ -25,8 +25,8 @@ interface Slide {
 const SLIDES: Slide[] = [
   {
     emoji: "📊",
-    title: "Suivi continu du bien-être",
-    desc: "Sommeil, activité physique, rythme cardiaque… collectés en continu depuis les objets connectés du patient.",
+    title: "Suivi continu de la santé mentale",
+    desc: "Sommeil, activité physique, rythme cardiaque… des signaux objectifs du quotidien pour suivre l'état mental du patient.",
   },
   {
     emoji: "🧠",
