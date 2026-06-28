@@ -332,6 +332,47 @@ class EscalationEngine:
             teleconsult_id,
         )
 
+        # --- 6b. Notifier le patient de sa teleconsultation d'urgence ---
+        # Le flux manuel previent deja le patient ; on fait de meme ici pour
+        # que le patient soit informe du RDV auto-planifie (notif + push FCM).
+        try:
+            lien_jitsi = f"{settings.JITSI_SERVER_URL}/{jitsi_room}"
+            patient_notif = Notification(
+                patient_id=str(patient.id),
+                risk_score_id=risk_score_id,
+                type=NotificationType.rdv_rappel,
+                level=1,
+                channel=NotificationChannel.push_fcm,
+                title="Teleconsultation d'urgence programmee",
+                body=(
+                    f"Une teleconsultation a ete programmee a "
+                    f"{scheduled_at.strftime('%H:%M')} UTC. "
+                    f"Lien de connexion : {lien_jitsi}"
+                ),
+                recipient_user_id=patient.user_id,
+                status=NotificationStatus.sent,
+                sent_at=datetime.now(timezone.utc),
+            )
+            # Savepoint : un echec ici ne doit pas annuler l'escalade.
+            async with db.begin_nested():
+                db.add(patient_notif)
+            push_patient_ok = await fcm_channel.send_push(
+                device_token=getattr(patient, "device_token_fcm", None) or "",
+                title="Teleconsultation d'urgence",
+                body=(
+                    f"Une teleconsultation est prevue a "
+                    f"{scheduled_at.strftime('%H:%M')} UTC."
+                ),
+                data={"type": "rdv_rappel", "teleconsult_id": teleconsult_id},
+            )
+            resultats["notification_patient_teleconsult"] = push_patient_ok
+        except Exception:
+            logger.exception(
+                "Echec notification patient (teleconsultation d'urgence) pour %s",
+                patient.id,
+            )
+            resultats["notification_patient_teleconsult"] = False
+
         # --- 7. SMS au contact d'urgence du patient ---
         emergency_phone = getattr(patient, "emergency_contact_phone", None) or ""
         if emergency_phone:

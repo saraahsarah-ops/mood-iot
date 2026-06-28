@@ -19,7 +19,7 @@ _BASELINES = [
 class TestScoringAlerte:
     async def test_compute_recent_cree_alerte(self, scoring_psy_client, db_query):
         # Agrégat du jour très éloigné des baselines -> score élevé -> alerte.
-        # is_recent=True (date du jour) -> _create_alert_notification s'exécute.
+        # is_recent=True (date du jour) -> _trigger_escalation s'exécute.
         today = date.today()
         db_query.add(
             DailyAggregate(
@@ -113,8 +113,8 @@ class TestScoringInternalAlerte:
     async def test_internal_recent_extreme_genere_alerte(
         self, scoring_psy_client, db_query
     ):
-        # Compute interne, date du jour, données extrêmes -> alerte (branche
-        # _create_alert_notification dans le chemin interne).
+        # Compute interne, date du jour, données extrêmes -> alerte
+        # (déclenche _trigger_escalation dans le chemin interne).
         today = date.today()
         db_query.add(
             DailyAggregate(

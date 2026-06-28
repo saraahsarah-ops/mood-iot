@@ -5,6 +5,7 @@ Connecte a PostgreSQL via SQLAlchemy async.
 """
 
 import logging
+import os
 from datetime import date, datetime, timezone
 from typing import Optional
 
@@ -19,8 +20,7 @@ from src.shared.config import settings
 from src.shared.auth import get_current_user, require_role
 from src.shared.database import get_db
 from src.shared.models import (
-    RiskScore, Patient, Baseline, DailyAggregate,
-    PatientPsychiatrist, Notification, NotificationType, NotificationChannel, NotificationStatus,
+    RiskScore, Patient, Baseline, DailyAggregate, PatientPsychiatrist,
 )
 from src.scoring.pipeline import get_pipeline
 
@@ -204,70 +204,50 @@ async def health():
 
 
 # ---------------------------------------------------------------------------
-# Notification helper — cree une alerte en DB pour le psychiatre
+# Escalade des alertes (déléguée au service notification)
 # ---------------------------------------------------------------------------
 
-ALERT_TITLES = {
-    1: "Score modere",
-    2: "Score eleve",
-    3: "Alerte critique",
-}
-ALERT_TYPES = {
-    1: NotificationType.coaching_ia,
-    2: NotificationType.alerte_psychiatre,
-    3: NotificationType.urgence,
-}
+# Service notification (reseau interne Docker/K8s). Surchargé en test via env
+# pour ne JAMAIS taper le vrai service (escalades reelles : emails/SMS).
+NOTIFICATION_SERVICE_URL = os.environ.get(
+    "NOTIFICATION_SERVICE_URL", "http://notification-service:8004"
+)
 
 
-async def _create_alert_notification(
+async def _trigger_escalation(
     patient_id: str,
     score: float,
     alert_level: int,
-    score_id: str,
-    top_features: list[dict],
-    db: AsyncSession,
-):
-    """Cree une notification dans la table notifications pour le psychiatre referent."""
-    # Recuperer le nom du patient
-    pat_result = await db.execute(select(Patient).where(Patient.id == patient_id))
-    patient = pat_result.scalar_one_or_none()
-    if not patient:
-        return
+    risk_score_id: str | None,
+    top_features: list,
+) -> None:
+    """Fire-and-forget : declenche l'escalade COMPLETE (coaching patient,
+    alerte temps reel + email + SMS au psychiatre, auto-teleconsult niveau 3)
+    dans le service notification via son endpoint interne. Un echec ici ne doit
+    jamais interrompre le calcul du score.
+    """
+    import httpx
 
-    # Recuperer le psychiatre referent
-    ref_result = await db.execute(
-        select(PatientPsychiatrist.psychiatrist_id)
-        .where(PatientPsychiatrist.patient_id == patient_id)
-        .limit(1)
-    )
-    psychiatrist_row = ref_result.scalar_one_or_none()
-    if not psychiatrist_row:
-        logger.warning("Aucun psychiatre referent pour patient %s", patient_id)
-        return
-
-    # Construire le message
-    title = ALERT_TITLES.get(alert_level, "Alerte")
-    features_text = ". ".join(f["message"] for f in top_features[:3]) if top_features else ""
-    body = f"{patient.first_name} {patient.last_name} — Score {score:.0f}/100. {features_text}"
-
-    notif = Notification(
-        patient_id=patient_id,
-        risk_score_id=score_id,
-        type=ALERT_TYPES.get(alert_level, NotificationType.system),
-        level=min(alert_level, 3),
-        channel=NotificationChannel.websocket,
-        title=title,
-        body=body,
-        recipient_user_id=str(psychiatrist_row),
-        status=NotificationStatus.sent,
-        sent_at=datetime.now(timezone.utc),
-    )
-    db.add(notif)
-    await db.commit()
-    logger.info(
-        "Notification creee pour patient %s (level=%d, score=%.1f)",
-        patient_id, alert_level, score,
-    )
+    shap = [
+        f.get("message", "")
+        for f in (top_features or [])
+        if isinstance(f, dict) and f.get("message")
+    ]
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            await client.post(
+                f"{NOTIFICATION_SERVICE_URL}/notifications/internal/escalate",
+                json={
+                    "patient_id": patient_id,
+                    "score": score,
+                    "alert_level": alert_level,
+                    "risk_score_id": risk_score_id,
+                    "shap_explanations": shap,
+                },
+                headers={"X-Internal-Service": settings.INTERNAL_SERVICE_SECRET},
+            )
+    except Exception as exc:  # best-effort
+        logger.warning("Escalade non declenchee pour %s : %s", patient_id, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -332,17 +312,15 @@ async def compute_score(
     from datetime import timedelta as _td
     is_recent = target_date >= (date.today() - _td(days=1))
     if result.get("alert_level", 0) >= 1 and is_recent:
-        try:
-            await _create_alert_notification(
-                patient_id=patient_id,
-                score=result["score"],
-                alert_level=result["alert_level"],
-                score_id=str(result["score_id"]),
-                top_features=result.get("top_features", []),
-                db=db,
-            )
-        except Exception:
-            logger.exception("Erreur creation notification pour patient %s", patient_id)
+        # Déclenche l'escalade complète (coaching patient / alerte temps réel +
+        # email + SMS psychiatre / auto-téléconsult niveau 3) — best-effort.
+        await _trigger_escalation(
+            patient_id=patient_id,
+            score=result["score"],
+            alert_level=result["alert_level"],
+            risk_score_id=str(result["score_id"]),
+            top_features=result.get("top_features", []),
+        )
 
     # Audit log
     from src.shared.audit import log_action
@@ -421,18 +399,14 @@ async def internal_compute_score(
     from datetime import timedelta as _td
     is_recent = target_date >= (date.today() - _td(days=1))
     if result.get("alert_level", 0) >= 1 and is_recent:
-        try:
-            from src.scoring.main import _create_alert_notification
-            await _create_alert_notification(
-                patient_id=patient_id,
-                score=result["score"],
-                alert_level=result["alert_level"],
-                score_id=str(result["score_id"]),
-                top_features=result.get("top_features", []),
-                db=db,
-            )
-        except Exception:
-            logger.exception("Erreur creation notification (internal) pour patient %s", patient_id)
+        # Idem flux interne (déclenché après sync des données du patient).
+        await _trigger_escalation(
+            patient_id=patient_id,
+            score=result["score"],
+            alert_level=result["alert_level"],
+            risk_score_id=str(result["score_id"]),
+            top_features=result.get("top_features", []),
+        )
 
     return {
         "status": "scored",

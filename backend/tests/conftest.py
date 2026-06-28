@@ -22,6 +22,10 @@ os.environ.setdefault("JWT_SECRET_KEY", "ci-test-secret-32-chars-long-please")
 # Forcé (pas setdefault) : l'image conteneur peut déjà avoir une valeur ;
 # on impose la nôtre pour tester le endpoint interne /scoring/internal/compute.
 os.environ["INTERNAL_SERVICE_SECRET"] = "test-internal-secret"
+# Sécurité : le scoring déclenche l'escalade via HTTP vers le service
+# notification. En test on pointe vers un trou noir (port fermé) pour ne JAMAIS
+# déclencher de vraies escalades (emails/SMS) — l'appel est best-effort.
+os.environ["NOTIFICATION_SERVICE_URL"] = "http://127.0.0.1:9"
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient

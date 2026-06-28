@@ -16,6 +16,7 @@ from typing import Optional
 from fastapi import (
     FastAPI,
     Depends,
+    Header,
     HTTPException,
     Query,
     WebSocket,
@@ -245,6 +246,44 @@ async def send_notification(
         notifications_created=1,
         success=True,
     )
+
+
+@app.post("/notifications/internal/escalate")
+async def internal_escalate(
+    payload: SendNotificationRequest,
+    db: AsyncSession = Depends(get_db),
+    x_internal_service: str = Header(default=""),
+):
+    """
+    Escalade declenchee par un service interne (scoring) apres calcul d'un
+    score. Protege par le secret partage `INTERNAL_SERVICE_SECRET` (header
+    `X-Internal-Service`) : permet au service scoring de declencher
+    automatiquement les emails / alertes temps reel / SMS / auto-teleconsult
+    sans token utilisateur.
+    """
+    expected = settings.INTERNAL_SERVICE_SECRET
+    if not expected or x_internal_service != expected:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Acces interne refuse"
+        )
+
+    if payload.alert_level is None or payload.alert_level < 1 or payload.score is None:
+        return {"status": "skipped", "reason": "pas d'alerte (niveau < 1)"}
+
+    engine = EscalationEngine()
+    result = await engine.process_alert(
+        patient_id=payload.patient_id,
+        score=payload.score,
+        alert_level=payload.alert_level,
+        risk_score_id=payload.risk_score_id or None,
+        shap_explanations=payload.shap_explanations or [],
+        db=db,
+    )
+    return {
+        "status": "escalated",
+        "alert_level": payload.alert_level,
+        "channels_used": result.get("channels_used", []),
+    }
 
 
 @app.get("/notifications/all", response_model=NotificationListResponse)
