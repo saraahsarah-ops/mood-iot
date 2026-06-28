@@ -332,6 +332,24 @@ export async function getPatientHistory(patientId: string) {
   return fetcher<any>(`/teleconsult/history/${patientId}`);
 }
 
+/**
+ * Recommandations de coaching IA envoyées au patient (notifications de type
+ * coaching_ia). Permet au médecin de voir les conseils que l'IA a donnés.
+ */
+export async function getPatientCoaching(patientId: string) {
+  return fetcher<{
+    notifications: Array<{
+      id: string;
+      title: string;
+      body: string;
+      created_at: string;
+      status: string;
+    }>;
+    total: number;
+    unread: number;
+  }>(`/notifications/${patientId}?notification_type=coaching_ia`);
+}
+
 export async function sendDirectMessage(patientId: string, content: string) {
   return fetcher<any>(`/teleconsult/messages/${patientId}`, {
     method: "POST",

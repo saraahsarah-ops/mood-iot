@@ -1,6 +1,17 @@
 "use client";
 import { useState, useEffect } from "react";
-import { getPatientHistory, generateAIAnalysis } from "@/lib/api";
+import {
+  getPatientHistory,
+  generateAIAnalysis,
+  getPatientCoaching,
+} from "@/lib/api";
+
+interface CoachingItem {
+  id: string;
+  title: string;
+  body: string;
+  created_at: string;
+}
 
 interface ClinicalHistoryProps {
   patientId: string;
@@ -9,6 +20,7 @@ interface ClinicalHistoryProps {
 export default function ClinicalHistory({ patientId }: ClinicalHistoryProps) {
   const [loading, setLoading] = useState(true);
   const [history, setHistory] = useState<any>(null);
+  const [coaching, setCoaching] = useState<CoachingItem[]>([]);
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
 
@@ -16,8 +28,12 @@ export default function ClinicalHistory({ patientId }: ClinicalHistoryProps) {
     async function loadHistory() {
       setLoading(true);
       try {
-        const data = await getPatientHistory(patientId);
-        setHistory(data);
+        const [hist, coach] = await Promise.all([
+          getPatientHistory(patientId),
+          getPatientCoaching(patientId).catch(() => ({ notifications: [] })),
+        ]);
+        setHistory(hist);
+        setCoaching((coach.notifications || []) as CoachingItem[]);
       } catch (err) {
         console.error("Erreur chargement historique:", err);
       } finally {
@@ -62,6 +78,37 @@ export default function ClinicalHistory({ patientId }: ClinicalHistoryProps) {
         ) : (
           <p className="text-[13px] text-gray-500">
             Cliquez sur le bouton pour générer une synthèse clinique automatique de ce dossier.
+          </p>
+        )}
+      </div>
+
+      {/* Coaching IA envoyé au patient */}
+      <div className="rounded-2xl border border-emerald-100 bg-emerald-50/30 p-5 shadow-sm">
+        <h3 className="text-[15px] font-bold text-emerald-800 mb-3">
+          Recommandations de coaching IA{" "}
+          <span className="text-[12px] font-normal text-emerald-600">
+            (envoyées au patient)
+          </span>
+        </h3>
+        {coaching.length > 0 ? (
+          <div className="space-y-3">
+            {coaching.map((c) => (
+              <div
+                key={c.id}
+                className="rounded-xl bg-white p-4 shadow-inner border border-emerald-50"
+              >
+                <p className="text-[12px] font-semibold text-emerald-600 mb-1">
+                  🌱 {new Date(c.created_at).toLocaleString("fr-FR")}
+                </p>
+                <p className="text-[13px] text-gray-700 whitespace-pre-wrap leading-relaxed">
+                  {c.body}
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[13px] text-gray-500">
+            Aucune recommandation de coaching envoyée pour le moment.
           </p>
         )}
       </div>
