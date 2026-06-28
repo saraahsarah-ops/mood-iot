@@ -75,6 +75,7 @@ class CreateSessionRequest(BaseModel):
 class SessionResponse(BaseModel):
     id: str
     patient_id: str
+    patient_name: Optional[str] = None
     psychiatre_id: str
     status: str
     scheduled_at: str
@@ -200,7 +201,26 @@ def _generate_jitsi_jwt(room_name: str, user_id: str, role: str) -> str:
     return pyjwt.encode(payload, settings.JITSI_JWT_SECRET, algorithm="HS256")
 
 
-def _session_to_response(s: TeleconsultSession) -> SessionResponse:
+async def _patient_names(db: AsyncSession, patient_ids: list) -> dict:
+    """Charge {patient_id: 'Prénom Nom'} pour une liste d'ids (1 requête)."""
+    ids = [pid for pid in patient_ids if pid]
+    if not ids:
+        return {}
+    from src.shared.models import Patient
+
+    res = await db.execute(
+        select(Patient.id, Patient.first_name, Patient.last_name).where(
+            Patient.id.in_(ids)
+        )
+    )
+    return {
+        str(r[0]): f"{r[1] or ''} {r[2] or ''}".strip() for r in res.all()
+    }
+
+
+def _session_to_response(
+    s: TeleconsultSession, patient_name: Optional[str] = None
+) -> SessionResponse:
     """Convert a TeleconsultSession ORM object to SessionResponse."""
     db_status = s.status.value if hasattr(s.status, "value") else str(s.status)
     api_status = _STATUS_FROM_DB.get(s.status, db_status)
@@ -208,6 +228,7 @@ def _session_to_response(s: TeleconsultSession) -> SessionResponse:
     return SessionResponse(
         id=str(s.id),
         patient_id=str(s.patient_id),
+        patient_name=patient_name or None,
         psychiatre_id=str(s.psychiatrist_id),
         status=api_status,
         scheduled_at=s.scheduled_at.isoformat() if s.scheduled_at else "",
@@ -312,7 +333,10 @@ async def create_session(
     # Notifier le patient que sa téléconsultation est programmée.
     await _notify_session_scheduled(db, session)
 
-    return _session_to_response(session)
+    _name = (await _patient_names(db, [session.patient_id])).get(
+        str(session.patient_id)
+    )
+    return _session_to_response(session, _name)
 
 
 @app.get("/teleconsult/sessions", response_model=SessionListResponse)
@@ -358,9 +382,12 @@ async def list_sessions(
     query = query.order_by(TeleconsultSession.scheduled_at.desc()).limit(limit)
     result = await db.execute(query)
     sessions = result.scalars().all()
+    names = await _patient_names(db, [s.patient_id for s in sessions])
 
     return SessionListResponse(
-        sessions=[_session_to_response(s) for s in sessions],
+        sessions=[
+            _session_to_response(s, names.get(str(s.patient_id))) for s in sessions
+        ],
         total=total,
     )
 
@@ -396,7 +423,10 @@ async def get_session_detail(
             detail="Vous n'etes pas participant de cette session",
         )
 
-    return _session_to_response(session)
+    _name = (await _patient_names(db, [session.patient_id])).get(
+        str(session.patient_id)
+    )
+    return _session_to_response(session, _name)
 
 
 @app.get(
@@ -596,7 +626,10 @@ async def end_session(
 
     await db.flush()
 
-    return _session_to_response(session)
+    _name = (await _patient_names(db, [session.patient_id])).get(
+        str(session.patient_id)
+    )
+    return _session_to_response(session, _name)
 
 
 # ---------------------------------------------------------------------------
@@ -754,8 +787,11 @@ async def get_patient_history(
         )
         messages = msg_res.scalars().all()
         
+    _pname = (
+        f"{patient.first_name} {patient.last_name}".strip() if patient else None
+    )
     return HistoryResponse(
-        teleconsults=[_session_to_response(s) for s in sessions],
+        teleconsults=[_session_to_response(s, _pname) for s in sessions],
         notes=[
             SessionNoteResponse(
                 id=str(n.id),
