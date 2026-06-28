@@ -52,6 +52,9 @@ class Settings(BaseSettings):
 
     # ── Notifications ───────────────────────────────────────────────────────
     ANTHROPIC_API_KEY: str = ""
+    # Modèle Claude pour le coaching IA + la synthèse clinique. Configurable
+    # par env (les anciens IDs type claude-sonnet-4-20250514 renvoient 404).
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-5-20250929"
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""
     # API Key Twilio (recommandé : révocable indépendamment des credentials

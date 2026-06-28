@@ -341,7 +341,16 @@ async def list_notifications(
     current_user: dict = Depends(get_current_user),
 ):
     """Lister les notifications d'un patient."""
-    query = select(Notification).where(Notification.patient_id == patient_id)
+    # Anti-fuite : un patient ne voit QUE les notifications qui lui sont
+    # adressées (coaching, rappels RDV), jamais les alertes destinées au
+    # médecin. Le médecin/admin voit tout le dossier (dashboard).
+    base_conditions = [Notification.patient_id == patient_id]
+    if current_user["role"] == "patient":
+        base_conditions.append(
+            Notification.recipient_user_id == current_user["user_id"]
+        )
+
+    query = select(Notification).where(and_(*base_conditions))
 
     if unread_only:
         query = query.where(Notification.status != NotificationStatus.read)
@@ -357,18 +366,13 @@ async def list_notifications(
             )
 
     # Total
-    count_q = select(func.count(Notification.id)).where(
-        Notification.patient_id == patient_id
-    )
+    count_q = select(func.count(Notification.id)).where(and_(*base_conditions))
     total_result = await db.execute(count_q)
     total = total_result.scalar() or 0
 
     # Non lues
     unread_q = select(func.count(Notification.id)).where(
-        and_(
-            Notification.patient_id == patient_id,
-            Notification.status != NotificationStatus.read,
-        )
+        and_(*base_conditions, Notification.status != NotificationStatus.read)
     )
     unread_result = await db.execute(unread_q)
     unread = unread_result.scalar() or 0
@@ -558,7 +562,7 @@ async def generate_ai_analysis(
         # psychiatre ; sans timeout le worker peut être bloqué jusqu'à 600s.
         client = anthropic.AsyncAnthropic(api_key=api_key, timeout=30.0)
         response = await client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=settings.ANTHROPIC_MODEL,
             max_tokens=1000,
             system="Tu es un assistant psychiatrique. Tu reponds toujours de maniere professionnelle, structuree, et en francais.",
             messages=[{"role": "user", "content": prompt}],

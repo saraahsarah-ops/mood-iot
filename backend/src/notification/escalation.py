@@ -109,7 +109,7 @@ class EscalationEngine:
     #  Niveau 1 : Coaching IA
     # ------------------------------------------------------------------ #
 
-    async def _handle_level_1(
+    async def _send_patient_coaching(
         self,
         patient: Patient,
         score: float,
@@ -117,35 +117,33 @@ class EscalationEngine:
         shap_explanations: list[str],
         db: AsyncSession,
     ) -> dict:
-        """Niveau 1 (40-60) : Coaching IA via Claude -> FCM push au patient."""
-        logger.info("Niveau 1 - Coaching IA pour le patient %s", patient.id)
-        resultats: dict[str, bool | str] = {}
-
-        # --- Generation du message de coaching via Claude ---
+        """Génère une recommandation de coaching IA (Claude) -> push FCM au
+        patient + persistance (type coaching_ia). Utilisé à TOUS les niveaux
+        (1, 2, 3) : le patient reçoit toujours une recommandation, le plus
+        important étant le niveau 1.
+        """
         patient_context = {
             "score": score,
             "shap_top3": shap_explanations[:3],
             "patient_first_name": patient.first_name,
         }
         coaching_message = await claude_coaching.generate_coaching(patient_context)
-        resultats["coaching_genere"] = True
-        resultats["coaching_message"] = coaching_message
 
-        # --- Envoi FCM push au patient ---
         fcm_ok = await fcm_channel.send_push(
             device_token=patient.device_token_fcm or "",
             title="Mood-IoT : Conseil bien-etre",
             body=coaching_message,
             data={"type": "coaching_ia", "risk_score_id": risk_score_id},
         )
-        resultats["fcm_patient"] = fcm_ok
 
-        # --- Persistance de la notification ---
-        notif_id = str(uuid4())
         notification = Notification(
-            id=notif_id,
+            id=str(uuid4()),
             patient_id=str(patient.id),
-            recipient_user_id=str(patient.user_id) if hasattr(patient, "user_id") and patient.user_id else str(patient.id),
+            recipient_user_id=(
+                str(patient.user_id)
+                if getattr(patient, "user_id", None)
+                else str(patient.id)
+            ),
             title="Coaching IA",
             body=coaching_message,
             type=NotificationType.coaching_ia,
@@ -156,8 +154,26 @@ class EscalationEngine:
         )
         db.add(notification)
         await db.flush()
-        logger.info("Notification de coaching persistee (id : %s)", notif_id)
+        logger.info("Coaching IA persiste pour le patient %s", patient.id)
+        return {
+            "coaching_genere": True,
+            "coaching_message": coaching_message,
+            "fcm_patient": fcm_ok,
+        }
 
+    async def _handle_level_1(
+        self,
+        patient: Patient,
+        score: float,
+        risk_score_id: str,
+        shap_explanations: list[str],
+        db: AsyncSession,
+    ) -> dict:
+        """Niveau 1 (40-60) : Coaching IA via Claude -> FCM push au patient."""
+        logger.info("Niveau 1 - Coaching IA pour le patient %s", patient.id)
+        resultats = await self._send_patient_coaching(
+            patient, score, risk_score_id, shap_explanations, db
+        )
         return {
             "alert_level": 1,
             "channels_used": ["claude_coaching", "fcm_patient"],
@@ -260,9 +276,24 @@ class EscalationEngine:
         await db.flush()
         logger.info("Notification d'alerte psychiatre persistee (id : %s)", notif_id)
 
+        # Le patient reçoit AUSSI une recommandation de coaching au niveau 2
+        # (et donc au niveau 3 qui passe par ici) — le coaching n'est pas
+        # réservé au niveau 1.
+        coaching = await self._send_patient_coaching(
+            patient, score, risk_score_id, shap_explanations, db
+        )
+        resultats.update(coaching)
+
         return {
             "alert_level": 2,
-            "channels_used": ["websocket", "sms_psychiatre", "fcm_psychiatre", "email_psychiatre"],
+            "channels_used": [
+                "websocket",
+                "sms_psychiatre",
+                "fcm_psychiatre",
+                "email_psychiatre",
+                "claude_coaching",
+                "fcm_patient",
+            ],
             "actions": resultats,
             "notification_id": notif_id,
         }

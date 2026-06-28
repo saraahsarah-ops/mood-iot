@@ -117,11 +117,15 @@ class TestNiveau2:
         # tous les canaux du niveau 2 sont sollicités
         mock_channels.ws.broadcast_alert.assert_awaited_once()
         mock_channels.tw.send_sms.assert_awaited_once()
-        mock_channels.fcm.send_push.assert_awaited_once()
         mock_channels.email.send_email.assert_awaited_once()
-        db.add.assert_called_once()
+        # Le patient reçoit AUSSI un coaching au niveau 2 -> coaching généré,
+        # 2e push FCM (psychiatre + patient) et 2e add (alerte + coaching).
+        mock_channels.cc.generate_coaching.assert_awaited_once()
+        assert mock_channels.fcm.send_push.await_count == 2
+        assert db.add.call_count == 2
         assert "error" not in res
         assert "websocket" in res["channels_used"]
+        assert "claude_coaching" in res["channels_used"]
 
     @pytest.mark.asyncio
     async def test_psychiatre_introuvable(self, engine, patient, mock_channels):

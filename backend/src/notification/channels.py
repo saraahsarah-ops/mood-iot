@@ -92,7 +92,7 @@ class ClaudeCoachingChannel:
 
         try:
             response = await self._client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model=settings.ANTHROPIC_MODEL,
                 max_tokens=300,
                 system=self._SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": user_prompt}],
