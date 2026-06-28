@@ -563,6 +563,12 @@ async def delete_patient(
                 detail="Vous n'etes pas assigne a ce patient",
             )
 
+    # Récupérer le compte Keycloak lié (pour le déprovisionner après la base).
+    kc_row = await db.execute(
+        select(User.keycloak_user_id).where(User.id == patient.user_id)
+    )
+    kc_user_id = kc_row.scalar_one_or_none()
+
     # Supprimer les donnees liees (cascades en BD, mais on nettoie explicitement)
     await db.execute(delete(DailyAggregate).where(DailyAggregate.patient_id == patient_id))
     await db.execute(delete(FeatureVector).where(FeatureVector.patient_id == patient_id))
@@ -582,6 +588,11 @@ async def delete_patient(
         resource_id=patient_id,
     )
     await db.commit()
+
+    # Déprovisionner le compte de connexion Keycloak (best-effort, hors transaction).
+    if kc_user_id:
+        from src.shared import keycloak_admin
+        await keycloak_admin.delete_account(str(kc_user_id))
 
     return {"message": f"Patient {patient_id} supprime avec succes."}
 
