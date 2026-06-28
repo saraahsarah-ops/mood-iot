@@ -54,9 +54,11 @@ export default function NotificationsPage() {
     }
   };
 
-  /* Extraire le score reel depuis le body ("Score de risque XX/100") */
+  /* Extraire le score reel depuis le body. Tolère les variantes de formulation :
+     "Score de risque : 93/100", "Score critique : 93/100", etc. (le ':' et le
+     mot intermédiaire ne cassent plus l'extraction). */
   const extractScore = (body: string): number => {
-    const m = body.match(/Score\s+(?:de\s+risque\s+)?(\d+(?:\.\d+)?)\s*\/\s*100/i);
+    const m = body.match(/Score[^\d]*(\d+(?:\.\d+)?)\s*\/\s*100/i);
     return m ? Math.round(parseFloat(m[1])) : 0;
   };
 

@@ -45,9 +45,11 @@ export default function NotificationCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <p className="text-[13px] font-semibold text-gray-800">{patientName}</p>
-            <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${levelBg} ${levelText}`}>
-              Score {score}
-            </span>
+            {score > 0 && (
+              <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${levelBg} ${levelText}`}>
+                Score {score}
+              </span>
+            )}
           </div>
           <p className="mt-1 text-[13px] leading-relaxed text-gray-500">{message}</p>
           <p className="mt-2 text-[11px] text-gray-400">{time}</p>
