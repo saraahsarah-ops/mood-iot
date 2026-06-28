@@ -40,7 +40,6 @@ from src.notification.channels import (
     fcm_channel,
     get_email_channel,
     get_sms_channel,
-    twilio_channel,
     ws_channel,
 )
 from src.shared.config import settings
@@ -324,21 +323,9 @@ class EscalationEngine:
         # --- Recuperation du psychiatre (deja valide par level2) ---
         psychiatrist = await self._get_psychiatrist(str(patient.id), db)
 
-        # --- 5. Appel vocal Twilio au psychiatre ---
-        if psychiatrist and psychiatrist.phone:
-            twiml_message = (
-                f"Alerte urgente Mood IoT. Le patient {patient.first_name} {patient.last_name} "
-                f"presente un score de risque critique de {score:.0f} sur 100. "
-                "Veuillez consulter le dashboard immediatement ou rappeler ce numero."
-            )
-            call_ok = await twilio_channel.make_call(
-                to_phone=psychiatrist.phone,
-                twiml_message=twiml_message,
-            )
-            resultats["appel_vocal_psychiatre"] = call_ok
-        else:
-            resultats["appel_vocal_psychiatre"] = False
-            logger.warning("Impossible d'effectuer l'appel vocal : psychiatre ou telephone manquant")
+        # NB : pas d'appel vocal — Mood-IoT n'utilise que SMS + email +
+        # notifications in-app/dashboard. (L'alerte niveau 2 a déjà notifié le
+        # psychiatre par SMS/email/push/WebSocket.)
 
         # --- 6. Creation automatique d'une session de teleconsultation (dans 2h) ---
         teleconsult_id = str(uuid4())
@@ -441,7 +428,7 @@ class EscalationEngine:
             body=(
                 f"Score critique : {score:.0f}/100. "
                 f"Teleconsultation planifiee a {scheduled_at.strftime('%H:%M')} UTC. "
-                "Appel vocal et SMS envoyes."
+                "SMS, email et notifications envoyes."
             ),
             type=NotificationType.urgence,
             level=3,
@@ -467,7 +454,7 @@ class EscalationEngine:
 
         all_channels = (
             level2_result.get("channels_used", [])
-            + ["appel_vocal_psychiatre", "teleconsultation", "sms_contact_urgence"]
+            + ["teleconsultation", "sms_contact_urgence"]
         )
 
         return {
