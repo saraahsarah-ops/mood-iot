@@ -73,7 +73,7 @@ export default function Sidebar() {
     : "DM";
 
   return (
-    <aside className="sticky top-0 flex h-screen w-[220px] shrink-0 flex-col bg-slate-900 text-white">
+    <aside className="sticky top-0 flex h-screen w-[220px] shrink-0 flex-col bg-[#14532d] text-white">
       {/* Logo */}
       <div className="flex items-center gap-3 px-6 py-6">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-primary-400 to-primary-700">
