@@ -42,6 +42,12 @@
       "runtimeExecutable": "docker",
       "runtimeArgs": ["compose", "up", "-d", "postgres", "redis", "localstack"],
       "port": 5432
+    },
+    {
+      "name": "dashboard",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "frontend/dashboard", "run", "dev"],
+      "port": 3000
     }
   ]
 }
