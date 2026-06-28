@@ -81,6 +81,10 @@ function RouteGate({ children }: { children: React.ReactNode }) {
 
   // Charge les notifications pour le badge sidebar quand connecte
   // ET seulement quand l'utilisateur a deja un profil cote backend
+  // IMPORTANT : dépendre de `user?.email` (primitif stable) et NON de l'objet
+  // `user`. Sinon, à chaque ré-hydratation de la session NextAuth l'objet `user`
+  // change de référence -> l'effet se relance en boucle -> spam de
+  // /notifications/all -> HTTP 429 (rate limit) et badge/notifs vides.
   useEffect(() => {
     if (!isAuthenticated || !user) return;
     getAllNotifications(50)
@@ -92,7 +96,8 @@ function RouteGate({ children }: { children: React.ReactNode }) {
       .catch(() => {
         // 404 = pas encore de profil, l'utilisateur doit completer son inscription
       });
-  }, [isAuthenticated, user, setStoreItems]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, user?.email]);
 
   // Redirige vers /login si page privee et non connecte
   useEffect(() => {
