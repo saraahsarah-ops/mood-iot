@@ -151,7 +151,9 @@ class EscalationEngine:
             title="Coaching IA",
             body=coaching_message,
             type=NotificationType.coaching_ia,
-            level=0 if is_stable else 1,
+            # La contrainte DB exige level >= 1 ; le ton « stable » est porté par
+            # le message (is_stable) et non par ce champ de sévérité.
+            level=1,
             channel=NotificationChannel.push_fcm,
             status=NotificationStatus.pending,
             risk_score_id=risk_score_id,
