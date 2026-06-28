@@ -93,7 +93,7 @@ export default function FichePatiente() {
         last_name: formData.last_name,
         date_of_birth: formData.date_of_birth,
         gender: formData.gender,
-        email: formData.email || undefined,
+        email: formData.email,
         phone: formData.phone || undefined,
       });
       setCrudMsg({ type: "ok", text: "Patient cree avec succes" });
@@ -381,7 +381,7 @@ export default function FichePatiente() {
                   <option value="other">Autre</option>
                 </select>
               </div>
-              <input type="email" placeholder="Email (optionnel)" value={formData.email} onChange={(e) => updateField("email", e.target.value)} className="rounded-xl border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-[13px] text-gray-700 placeholder-gray-400 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20" />
+              <input type="email" placeholder="Email * (le patient recevra un lien pour creer son mot de passe)" value={formData.email} onChange={(e) => updateField("email", e.target.value)} required className="rounded-xl border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-[13px] text-gray-700 placeholder-gray-400 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20" />
               <input type="tel" placeholder="Telephone (optionnel)" value={formData.phone} onChange={(e) => updateField("phone", e.target.value)} className="rounded-xl border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-[13px] text-gray-700 placeholder-gray-400 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20" />
             </div>
             <div className="mt-4 flex justify-end gap-2">

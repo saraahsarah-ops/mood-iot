@@ -83,7 +83,10 @@ class PatientCreate(BaseModel):
     last_name: str = Field(..., min_length=1, max_length=100)
     date_of_birth: str = Field(..., description="Format ISO 8601 (YYYY-MM-DD)")
     gender: Gender
-    email: Optional[str] = None
+    # Email OBLIGATOIRE : sert d'identifiant de connexion. Un compte Keycloak est
+    # créé et le patient reçoit un email pour définir son mot de passe.
+    email: str = Field(..., min_length=5, max_length=255,
+                       description="Email du patient (obligatoire — accès à l'app)")
     phone: Optional[str] = None
     psychiatre_id: Optional[str] = None
 
@@ -333,58 +336,94 @@ async def create_patient(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_role("psychiatre", "admin")),
 ):
-    """Creer un nouveau dossier patient."""
-    import uuid
-    import secrets
-    import bcrypt
-    
+    """Creer un nouveau dossier patient + son compte de connexion.
+
+    Flux complet :
+      1. Validation de l'email (obligatoire).
+      2. Création du compte Keycloak (rôle `patient`) + email « définir mot de
+         passe » envoyé au patient.
+      3. Création du dossier (User + Patient) lié au compte Keycloak.
+    Si la création en base échoue, le compte Keycloak est supprimé (rollback).
+    """
+    from src.shared import keycloak_admin
+
     db_gender = GENDER_MAP.get(payload.gender.value, "autre")
-    
-    user_email = payload.email or f"patient_{uuid.uuid4().hex[:8]}@mood-iot.local"
-    password = secrets.token_urlsafe(12)
-    password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-    
-    user = User(
-        email=user_email,
-        password_hash=password_hash,
-        role="patient",
-        mfa_enabled=False,
-    )
-    db.add(user)
-    await db.flush()
 
-    patient = Patient(
-        user_id=user.id,
-        first_name=payload.first_name,
-        last_name=payload.last_name,
-        date_of_birth=date.fromisoformat(payload.date_of_birth) if payload.date_of_birth else None,
-        gender=db_gender,
-        emergency_contact_phone=payload.phone,
-    )
-    db.add(patient)
-    await db.flush()
-
-    # Assign psychiatrist
-    psych_id = payload.psychiatre_id or current_user["user_id"]
-    assignment = PatientPsychiatrist(
-        patient_id=patient.id,
-        psychiatrist_id=psych_id,
-        is_primary=True,
-    )
-    db.add(assignment)
-
-    # Initialize default consents (all False)
-    for ct in ConsentType:
-        consent = Consent(
-            patient_id=patient.id,
-            consent_type=ct,
-            is_granted=False,
+    # 1) Email obligatoire et minimalement valide (identifiant de connexion).
+    email = payload.email.strip().lower()
+    domain = email.split("@")[-1] if "@" in email else ""
+    if "@" not in email or "." not in domain:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Un email valide est obligatoire pour créer le compte du patient.",
         )
-        db.add(consent)
 
-    await db.flush()
+    # 2) Compte Keycloak (+ email pour que le patient définisse son mot de passe).
+    try:
+        kc_user_id = await keycloak_admin.create_patient_account(
+            email=email,
+            first_name=payload.first_name,
+            last_name=payload.last_name,
+        )
+    except keycloak_admin.KeycloakAdminError as exc:
+        if str(exc) == "email_deja_utilise":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cet email est déjà utilisé par un compte existant.",
+            )
+        logger.error("Création du compte Keycloak échouée : %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Impossible de créer le compte de connexion du patient.",
+        )
 
-    return _patient_to_response(patient, psych_id, payload.email)
+    # 3) Dossier en base, lié au compte Keycloak. En cas d'échec -> rollback +
+    #    suppression du compte Keycloak orphelin.
+    psych_id = payload.psychiatre_id or current_user["user_id"]
+    try:
+        user = User(
+            email=email,
+            keycloak_user_id=kc_user_id,
+            role="patient",
+            mfa_enabled=False,
+        )
+        db.add(user)
+        await db.flush()
+
+        patient = Patient(
+            user_id=user.id,
+            first_name=payload.first_name,
+            last_name=payload.last_name,
+            date_of_birth=date.fromisoformat(payload.date_of_birth) if payload.date_of_birth else None,
+            gender=db_gender,
+            emergency_contact_phone=payload.phone,
+        )
+        db.add(patient)
+        await db.flush()
+
+        assignment = PatientPsychiatrist(
+            patient_id=patient.id,
+            psychiatrist_id=psych_id,
+            is_primary=True,
+        )
+        db.add(assignment)
+
+        # Consentements par défaut (tous à False).
+        for ct in ConsentType:
+            db.add(Consent(patient_id=patient.id, consent_type=ct, is_granted=False))
+
+        await db.flush()
+    except Exception:
+        await db.rollback()
+        await keycloak_admin.delete_account(kc_user_id)
+        logger.exception("Échec création dossier patient ; compte Keycloak annulé")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Impossible de créer le dossier patient.",
+        )
+
+    logger.info("Patient %s créé (compte Keycloak %s, email %s)", patient.id, kc_user_id, email)
+    return _patient_to_response(patient, psych_id, email)
 
 
 @app.get("/patients/me", response_model=PatientResponse)
