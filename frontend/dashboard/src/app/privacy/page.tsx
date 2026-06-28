@@ -165,8 +165,9 @@ const sections = [
           limitee et support de l'authentification multi-facteurs (TOTP).
         </li>
         <li>
-          <strong>Audit des acces</strong> : chaque consultation, modification ou
-          export de donnees est enregistre dans un journal d'audit immutable.
+          <strong>Audit des acces</strong> : les consultations, modifications et
+          exports de donnees sensibles sont enregistres dans un journal d'audit
+          horodate, conserve a des fins de securite et de tracabilite.
         </li>
         <li>
           <strong>Controle d'acces base sur les roles</strong> (RBAC) : seuls les
@@ -210,9 +211,9 @@ const sections = [
                 <td className="py-2">USA</td>
               </tr>
               <tr>
-                <td className="py-2 pr-4">Twilio</td>
+                <td className="py-2 pr-4">OVHcloud (OVH SAS)</td>
                 <td className="py-2 pr-4">Envoi de SMS d'alerte</td>
-                <td className="py-2">USA</td>
+                <td className="py-2">France (UE)</td>
               </tr>
               <tr>
                 <td className="py-2 pr-4">Resend</td>
