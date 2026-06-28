@@ -49,12 +49,15 @@ def mock_channels():
          patch.object(esc, "fcm_channel") as fcm, \
          patch.object(esc, "ws_channel") as ws, \
          patch.object(esc, "twilio_channel") as tw, \
+         patch.object(esc, "get_sms_channel") as gsms, \
          patch.object(esc, "get_email_channel") as gec:
         cc.generate_coaching = AsyncMock(return_value="Courage Hugo")
         fcm.send_push = AsyncMock(return_value=True)
         ws.broadcast_alert = AsyncMock(return_value=True)
         tw.send_sms = AsyncMock(return_value=True)
         tw.make_call = AsyncMock(return_value=True)
+        # Les SMS passent par get_sms_channel() (OVH si configuré, sinon Twilio).
+        gsms.return_value = tw
         email = MagicMock()
         email.send_email = AsyncMock(return_value=True)
         gec.return_value = email

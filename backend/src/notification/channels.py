@@ -498,6 +498,89 @@ class ResendChannel:
             return False
 
 
+class OVHSmsChannel:
+    """SMS via l'API OVHcloud (souveraineté FR/UE).
+
+    Activé si les clés OVH sont renseignées ; sinon on retombe sur Twilio.
+    Authentification par signature OVH (SHA1). API SMS :
+    POST {endpoint}/sms/{serviceName}/jobs.
+    """
+
+    def __init__(self) -> None:
+        self._app_key = settings.OVH_SMS_APPLICATION_KEY
+        self._app_secret = settings.OVH_SMS_APPLICATION_SECRET
+        self._consumer_key = settings.OVH_SMS_CONSUMER_KEY
+        self._service = settings.OVH_SMS_SERVICE_NAME
+        self._sender = settings.OVH_SMS_SENDER
+        self._endpoint = settings.OVH_SMS_ENDPOINT or "https://eu.api.ovh.com/1.0"
+        self.configured = bool(
+            self._app_key
+            and self._app_secret
+            and self._consumer_key
+            and self._service
+        )
+        if not self.configured:
+            logger.info("OVH SMS non configuré - SMS via Twilio (fallback)")
+
+    async def send_sms(self, to_phone: str, message: str) -> bool:
+        if not self.configured:
+            logger.warning("OVH SMS non configuré - SMS ignoré")
+            return False
+        if not to_phone:
+            logger.warning("Numéro manquant - SMS OVH ignoré")
+            return False
+
+        import hashlib
+        import time
+
+        import httpx
+
+        url = f"{self._endpoint}/sms/{self._service}/jobs"
+        payload: dict = {
+            "message": message,
+            "receivers": [to_phone],
+            "noStopClause": True,  # transactionnel (pas de mention STOP)
+            "charset": "UTF-8",
+            "priority": "high",
+        }
+        if self._sender:
+            payload["sender"] = self._sender
+        else:
+            payload["senderForResponse"] = True  # numéro court OVH
+        body = json.dumps(payload)
+        ts = str(int(time.time()))
+        to_sign = "+".join(
+            [self._app_secret, self._consumer_key, "POST", url, body, ts]
+        )
+        signature = "$1$" + hashlib.sha1(to_sign.encode()).hexdigest()
+        headers = {
+            "X-Ovh-Application": self._app_key,
+            "X-Ovh-Consumer": self._consumer_key,
+            "X-Ovh-Timestamp": ts,
+            "X-Ovh-Signature": signature,
+            "Content-Type": "application/json",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(url, content=body, headers=headers)
+            if resp.status_code in (200, 201):
+                data = resp.json()
+                valid = data.get("validReceivers") or []
+                logger.info(
+                    "SMS OVH envoyé (ids: %s, valides: %s)",
+                    data.get("ids"),
+                    valid,
+                )
+                return bool(data.get("ids") or valid)
+            logger.error(
+                "Erreur SMS OVH HTTP %d : %s", resp.status_code, resp.text[:200]
+            )
+            return False
+        except Exception as exc:
+            logger.error("Erreur SMS OVH vers %s : %s", to_phone, exc)
+            return False
+
+
 # ---------------------------------------------------------------------------
 # Singletons des canaux (initialises une seule fois au demarrage)
 # ---------------------------------------------------------------------------
@@ -505,6 +588,7 @@ class ResendChannel:
 claude_coaching = ClaudeCoachingChannel()
 fcm_channel = FCMChannel()
 twilio_channel = TwilioChannel()
+ovh_sms_channel = OVHSmsChannel()
 ses_channel = SESChannel()
 resend_channel = ResendChannel()
 ws_channel = WebSocketChannel()
@@ -515,3 +599,11 @@ def get_email_channel():
     if resend_channel._api_key:
         return resend_channel
     return ses_channel
+
+
+def get_sms_channel():
+    """Retourne le canal SMS actif : OVH (souveraineté FR/UE) si configuré,
+    sinon Twilio. La voix (appels) reste sur Twilio."""
+    if ovh_sms_channel.configured:
+        return ovh_sms_channel
+    return twilio_channel

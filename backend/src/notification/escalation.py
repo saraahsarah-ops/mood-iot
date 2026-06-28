@@ -39,6 +39,7 @@ from src.notification.channels import (
     claude_coaching,
     fcm_channel,
     get_email_channel,
+    get_sms_channel,
     twilio_channel,
     ws_channel,
 )
@@ -234,7 +235,7 @@ class EscalationEngine:
             f"[Mood-IoT ALERTE] Patient {patient.first_name} {patient.last_name} - "
             f"Score {score:.0f}/100. Consultez le dashboard pour plus de details."
         )
-        sms_ok = await twilio_channel.send_sms(
+        sms_ok = await get_sms_channel().send_sms(
             to_phone=psychiatrist.phone or "",
             message=sms_message,
         )
@@ -413,7 +414,7 @@ class EscalationEngine:
                 f"planifiee a {scheduled_at.strftime('%H:%M')} UTC. "
                 "Merci de contacter le patient ou le service de soins."
             )
-            sms_urgence_ok = await twilio_channel.send_sms(
+            sms_urgence_ok = await get_sms_channel().send_sms(
                 to_phone=emergency_phone,
                 message=sms_urgence,
             )

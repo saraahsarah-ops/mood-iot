@@ -66,6 +66,16 @@ class Settings(BaseSettings):
     # Laisser vide pour les comptes globaux (US1).
     TWILIO_REGION: str = ""
     TWILIO_EDGE: str = ""
+    # ── SMS OVHcloud (souveraineté FR/UE) — prioritaire sur Twilio si configuré.
+    # Créer un token API sur https://api.ovh.com/createToken (droits GET/POST
+    # sur /sms/*). OVH_SMS_SENDER = expéditeur alphanumérique homologué ; laisser
+    # vide pour utiliser un numéro court (senderForResponse).
+    OVH_SMS_ENDPOINT: str = "https://eu.api.ovh.com/1.0"
+    OVH_SMS_APPLICATION_KEY: str = ""
+    OVH_SMS_APPLICATION_SECRET: str = ""
+    OVH_SMS_CONSUMER_KEY: str = ""
+    OVH_SMS_SERVICE_NAME: str = ""
+    OVH_SMS_SENDER: str = ""
     FCM_CREDENTIALS_JSON: str = "{}"
     SES_FROM_EMAIL: str = "noreply@mood-iot.fr"
     RESEND_API_KEY: str = ""
