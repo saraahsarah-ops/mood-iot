@@ -100,6 +100,13 @@ services:
       KC_METRICS_ENABLED: "false"
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+      # Désactive le cache des thèmes : sinon Keycloak (mode prod) sert la
+      # version cachée du CSS même après mise à jour du fichier monté → le
+      # rebranding (couleurs) n'apparaît pas. STATIC_MAX_AGE=-1 évite aussi
+      # le cache navigateur agressif sur les ressources de thème.
+      KC_SPI_THEME_CACHE_THEMES: "false"
+      KC_SPI_THEME_CACHE_TEMPLATES: "false"
+      KC_SPI_THEME_STATIC_MAX_AGE: "-1"
       # SMTP Resend : le realm référence ${env.RESEND_API_KEY} comme mot de
       # passe SMTP. Sans cette variable, l'auth SMTP échoue → emails de
       # vérification non envoyés.
