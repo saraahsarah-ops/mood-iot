@@ -70,10 +70,19 @@ class ClaudeCoachingChannel:
         prenom = patient_context.get("patient_first_name", "")
         score = patient_context.get("score", 0)
         shap_top3 = patient_context.get("shap_top3", [])
+        # Patient "stable" (score faible, pas d'alerte) : coaching de RENFORCEMENT
+        # positif (féliciter, entretenir les bonnes habitudes) plutôt que correctif.
+        is_stable = patient_context.get("is_stable", False)
 
         # --- Cle API absente : message par defaut ---
         if not self._client:
             logger.info("Coaching IA : utilisation du message par defaut (cle API absente)")
+            if is_stable:
+                return (
+                    f"Bonjour {prenom}, vos indicateurs sont au beau fixe. "
+                    "Continuez ainsi : sommeil regulier, activite et moments de detente. "
+                    "Bravo pour ces bonnes habitudes !"
+                )
             return (
                 f"Bonjour {prenom}, nous avons remarque quelques signaux. "
                 "N'oubliez pas de prendre soin de vous aujourd'hui. "
@@ -82,13 +91,24 @@ class ClaudeCoachingChannel:
 
         # --- Construction du prompt utilisateur ---
         explications = "\n".join(f"- {e}" for e in shap_top3) if shap_top3 else "Aucune explication disponible."
-        user_prompt = (
-            f"Le patient s'appelle {prenom}. "
-            f"Son score de bien-etre actuel est de {score:.0f}/100 (plus le score est eleve, plus le risque est important). "
-            f"Les principaux facteurs identifies sont :\n{explications}\n\n"
-            "Genere un court message de coaching bienveillant et motivant en francais "
-            "pour l'aider a se sentir mieux, sans mentionner le score numerique."
-        )
+        if is_stable:
+            user_prompt = (
+                f"Le patient s'appelle {prenom}. "
+                f"Son score de bien-etre est bas (donc TRES bon, peu de risque). "
+                f"Voici ses indicateurs du moment :\n{explications}\n\n"
+                "Genere un court message de coaching POSITIF et de RENFORCEMENT en francais : "
+                "felicite-le pour ses bonnes habitudes, encourage-le a les maintenir, "
+                "en t'appuyant sur ses indicateurs. Ne mentionne pas de score numerique "
+                "et n'evoque aucun probleme ni risque."
+            )
+        else:
+            user_prompt = (
+                f"Le patient s'appelle {prenom}. "
+                f"Son score de bien-etre actuel est de {score:.0f}/100 (plus le score est eleve, plus le risque est important). "
+                f"Les principaux facteurs identifies sont :\n{explications}\n\n"
+                "Genere un court message de coaching bienveillant et motivant en francais "
+                "pour l'aider a se sentir mieux, sans mentionner le score numerique."
+            )
 
         try:
             response = await self._client.messages.create(

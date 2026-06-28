@@ -311,7 +311,7 @@ async def compute_score(
     # (pas pour les recomputes historiques)
     from datetime import timedelta as _td
     is_recent = target_date >= (date.today() - _td(days=1))
-    if result.get("alert_level", 0) >= 1 and is_recent:
+    if result.get("alert_level", 0) >= 0 and is_recent:
         # Déclenche l'escalade complète (coaching patient / alerte temps réel +
         # email + SMS psychiatre / auto-téléconsult niveau 3) — best-effort.
         await _trigger_escalation(
@@ -398,7 +398,7 @@ async def internal_compute_score(
 
     from datetime import timedelta as _td
     is_recent = target_date >= (date.today() - _td(days=1))
-    if result.get("alert_level", 0) >= 1 and is_recent:
+    if result.get("alert_level", 0) >= 0 and is_recent:
         # Idem flux interne (déclenché après sync des données du patient).
         await _trigger_escalation(
             patient_id=patient_id,

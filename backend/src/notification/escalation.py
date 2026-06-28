@@ -84,10 +84,6 @@ class EscalationEngine:
             alert_level,
         )
 
-        if alert_level == 0:
-            logger.info("Niveau 0 : aucune action requise pour le patient %s", patient_id)
-            return {"alert_level": 0, "channels_used": [], "actions": {}}
-
         # --- Recuperation des donnees du patient ---
         patient = await self._get_patient(patient_id, db)
         if not patient:
@@ -95,7 +91,9 @@ class EscalationEngine:
             return {"alert_level": alert_level, "error": "patient_introuvable"}
 
         # --- Dispatch selon le niveau ---
-        if alert_level == 1:
+        if alert_level == 0:
+            return await self._handle_level_0(patient, score, risk_score_id, shap_explanations, db)
+        elif alert_level == 1:
             return await self._handle_level_1(patient, score, risk_score_id, shap_explanations, db)
         elif alert_level == 2:
             return await self._handle_level_2(patient, score, risk_score_id, shap_explanations, db)
@@ -116,22 +114,28 @@ class EscalationEngine:
         risk_score_id: str,
         shap_explanations: list[str],
         db: AsyncSession,
+        is_stable: bool = False,
     ) -> dict:
         """Génère une recommandation de coaching IA (Claude) -> push FCM au
-        patient + persistance (type coaching_ia). Utilisé à TOUS les niveaux
-        (1, 2, 3) : le patient reçoit toujours une recommandation, le plus
-        important étant le niveau 1.
+        patient + persistance (type coaching_ia). Utilisé à TOUS les niveaux :
+        - niveau 0 (stable) : coaching de RENFORCEMENT positif (is_stable=True) ;
+        - niveaux 1/2/3 : coaching correctif (le plus important étant le 1).
         """
         patient_context = {
             "score": score,
             "shap_top3": shap_explanations[:3],
             "patient_first_name": patient.first_name,
+            "is_stable": is_stable,
         }
         coaching_message = await claude_coaching.generate_coaching(patient_context)
 
+        titre_push = (
+            "Mood-IoT : Bravo, continuez !" if is_stable
+            else "Mood-IoT : Conseil bien-etre"
+        )
         fcm_ok = await fcm_channel.send_push(
             device_token=patient.device_token_fcm or "",
-            title="Mood-IoT : Conseil bien-etre",
+            title=titre_push,
             body=coaching_message,
             data={"type": "coaching_ia", "risk_score_id": risk_score_id},
         )
@@ -147,18 +151,42 @@ class EscalationEngine:
             title="Coaching IA",
             body=coaching_message,
             type=NotificationType.coaching_ia,
-            level=1,
+            level=0 if is_stable else 1,
             channel=NotificationChannel.push_fcm,
             status=NotificationStatus.pending,
             risk_score_id=risk_score_id,
         )
         db.add(notification)
         await db.flush()
-        logger.info("Coaching IA persiste pour le patient %s", patient.id)
+        logger.info("Coaching IA persiste pour le patient %s (stable=%s)", patient.id, is_stable)
         return {
             "coaching_genere": True,
             "coaching_message": coaching_message,
             "fcm_patient": fcm_ok,
+        }
+
+    async def _handle_level_0(
+        self,
+        patient: Patient,
+        score: float,
+        risk_score_id: str,
+        shap_explanations: list[str],
+        db: AsyncSession,
+    ) -> dict:
+        """Niveau 0 (stable, score < 40) : coaching IA de RENFORCEMENT positif.
+
+        Le patient va bien : on le félicite et on l'encourage à maintenir ses
+        bonnes habitudes, en s'appuyant sur ses indicateurs. Aucune alerte au
+        psychiatre (rien à signaler).
+        """
+        logger.info("Niveau 0 - Coaching de renforcement pour le patient %s", patient.id)
+        resultats = await self._send_patient_coaching(
+            patient, score, risk_score_id, shap_explanations, db, is_stable=True
+        )
+        return {
+            "alert_level": 0,
+            "channels_used": ["claude_coaching", "fcm_patient"],
+            "actions": resultats,
         }
 
     async def _handle_level_1(

@@ -73,13 +73,21 @@ def engine():
 # --------------------------------------------------------------------------
 class TestProcessAlertRouting:
     @pytest.mark.asyncio
-    async def test_niveau_0_aucune_action(self, engine):
-        db = make_db()
+    async def test_niveau_0_coaching_renforcement(self, engine, patient, mock_channels):
+        # Niveau 0 (stable) : le patient reçoit un coaching de RENFORCEMENT positif
+        # (is_stable=True), mais aucune alerte au psychiatre.
+        db = make_db(patient)
         res = await engine.process_alert(patient_id="p1", score=20, alert_level=0,
-                                         risk_score_id="r1", shap_explanations=[], db=db)
+                                         risk_score_id="r1", shap_explanations=["Sommeil regulier"], db=db)
         assert res["alert_level"] == 0
-        assert res["channels_used"] == []
-        db.execute.assert_not_called()  # pas de requête pour le niveau 0
+        assert "claude_coaching" in res["channels_used"]
+        mock_channels.cc.generate_coaching.assert_awaited_once()
+        # Le contexte transmis à Claude doit marquer le patient comme stable.
+        ctx = mock_channels.cc.generate_coaching.await_args.args[0]
+        assert ctx["is_stable"] is True
+        mock_channels.fcm.send_push.assert_awaited_once()
+        # Pas d'alerte psychiatre au niveau 0.
+        mock_channels.email.send_email.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_patient_introuvable(self, engine, mock_channels):

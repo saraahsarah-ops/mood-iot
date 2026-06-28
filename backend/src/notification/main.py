@@ -267,8 +267,9 @@ async def internal_escalate(
             status_code=status.HTTP_403_FORBIDDEN, detail="Acces interne refuse"
         )
 
-    if payload.alert_level is None or payload.alert_level < 1 or payload.score is None:
-        return {"status": "skipped", "reason": "pas d'alerte (niveau < 1)"}
+    # Niveau 0 (stable) inclus : le patient reçoit un coaching de renforcement.
+    if payload.alert_level is None or payload.alert_level < 0 or payload.score is None:
+        return {"status": "skipped", "reason": "niveau invalide"}
 
     engine = EscalationEngine()
     result = await engine.process_alert(
