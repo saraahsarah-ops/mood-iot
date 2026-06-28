@@ -352,9 +352,17 @@ class EscalationEngine:
             teleconsult_id,
         )
 
-        # --- 6b. Notifier le patient de sa teleconsultation d'urgence ---
-        # Le flux manuel previent deja le patient ; on fait de meme ici pour
-        # que le patient soit informe du RDV auto-planifie (notif + push FCM).
+        # --- 6b. Notifier le patient de son rendez-vous (in-app + email) ---
+        # Important : on NE communique PAS au patient le niveau d'alerte ni le
+        # score. Le message reste bienveillant et sobre : « il est important
+        # d'échanger avec votre psychiatre » + le lien de la téléconsultation.
+        horaire = scheduled_at.strftime("%H:%M")
+        titre_patient = "Rendez-vous avec votre psychiatre"
+        corps_patient = (
+            f"Bonjour {patient.first_name}, il est important que vous échangiez "
+            f"prochainement avec votre psychiatre. Une téléconsultation est prévue "
+            f"à {horaire} UTC. Vous pouvez la rejoindre avec ce lien : {lien_jitsi}"
+        )
         try:
             patient_notif = Notification(
                 patient_id=str(patient.id),
@@ -362,12 +370,8 @@ class EscalationEngine:
                 type=NotificationType.rdv_rappel,
                 level=1,
                 channel=NotificationChannel.push_fcm,
-                title="Teleconsultation d'urgence programmee",
-                body=(
-                    f"Une teleconsultation a ete programmee a "
-                    f"{scheduled_at.strftime('%H:%M')} UTC. "
-                    f"Lien de connexion : {lien_jitsi}"
-                ),
+                title=titre_patient,
+                body=corps_patient,
                 recipient_user_id=patient.user_id,
                 status=NotificationStatus.sent,
                 sent_at=datetime.now(timezone.utc),
@@ -377,20 +381,40 @@ class EscalationEngine:
                 db.add(patient_notif)
             push_patient_ok = await fcm_channel.send_push(
                 device_token=getattr(patient, "device_token_fcm", None) or "",
-                title="Teleconsultation d'urgence",
-                body=(
-                    f"Une teleconsultation est prevue a "
-                    f"{scheduled_at.strftime('%H:%M')} UTC."
-                ),
+                title=titre_patient,
+                body=f"Une téléconsultation est prévue à {horaire} UTC. Touchez pour la rejoindre.",
                 data={"type": "rdv_rappel", "teleconsult_id": teleconsult_id},
             )
             resultats["notification_patient_teleconsult"] = push_patient_ok
         except Exception:
             logger.exception(
-                "Echec notification patient (teleconsultation d'urgence) pour %s",
+                "Echec notification patient (in-app) pour %s",
                 patient.id,
             )
             resultats["notification_patient_teleconsult"] = False
+
+        # --- 6c. Email bienveillant au patient (même message sobre + lien) ---
+        try:
+            patient_user = (
+                await db.execute(select(User).where(User.id == patient.user_id))
+            ).scalars().first()
+            patient_email = getattr(patient_user, "email", None)
+            if patient_email:
+                html_patient = self._build_patient_teleconsult_email_html(
+                    patient, horaire, lien_jitsi
+                )
+                email_patient_ok = await get_email_channel().send_email(
+                    to_email=patient_email,
+                    subject=titre_patient,
+                    html_body=html_patient,
+                )
+                resultats["email_patient_teleconsult"] = email_patient_ok
+            else:
+                resultats["email_patient_teleconsult"] = False
+                logger.warning("Email patient introuvable pour %s", patient.id)
+        except Exception:
+            logger.exception("Echec email patient (téléconsultation) pour %s", patient.id)
+            resultats["email_patient_teleconsult"] = False
 
         # --- 7. SMS au contact d'urgence du patient ---
         emergency_phone = getattr(patient, "emergency_contact_phone", None) or ""
@@ -505,6 +529,49 @@ class EscalationEngine:
             .where(PatientPsychiatrist.patient_id == patient_id)
         )
         return result.scalars().first()
+
+    def _build_patient_teleconsult_email_html(
+        self,
+        patient: Patient,
+        horaire: str,
+        teleconsult_link: str,
+    ) -> str:
+        """Email bienveillant au patient : ni niveau, ni score, juste le RDV.
+
+        Ton rassurant et sobre — on invite simplement le patient à rejoindre
+        sa téléconsultation, sans mentionner d'alerte ni de détails cliniques.
+        """
+        vert = "#16a34a"
+        return f"""
+        <!DOCTYPE html>
+        <html lang="fr">
+        <head><meta charset="UTF-8"></head>
+        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: auto;">
+            <div style="background: {vert}; color: white; padding: 16px; border-radius: 8px 8px 0 0;">
+                <h2 style="margin: 0;">Rendez-vous avec votre psychiatre</h2>
+            </div>
+            <div style="border: 1px solid #ddd; padding: 20px; border-radius: 0 0 8px 8px;">
+                <p>Bonjour {patient.first_name},</p>
+                <p>Il est important que vous échangiez prochainement avec votre
+                   psychiatre. Une téléconsultation a été prévue
+                   <strong>à {horaire} UTC</strong>.</p>
+                <p>Vous pouvez la rejoindre directement en cliquant ci-dessous :</p>
+                <p style="text-align: center; margin: 24px 0;">
+                    <a href="{teleconsult_link}"
+                       style="background: {vert}; color: #ffffff; text-decoration: none;
+                              padding: 12px 30px; border-radius: 8px; font-weight: bold;
+                              display: inline-block; font-size: 15px;">
+                        Rejoindre la téléconsultation
+                    </a>
+                </p>
+                <p style="font-size: 13px; color: #555; word-break: break-all;">
+                    Si le bouton ne fonctionne pas, copiez ce lien : {teleconsult_link}
+                </p>
+                <p>Prenez soin de vous,<br>L'équipe Mood-IoT</p>
+            </div>
+        </body>
+        </html>
+        """
 
     def _build_alert_email_html(
         self,
