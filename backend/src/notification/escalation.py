@@ -331,6 +331,7 @@ class EscalationEngine:
         teleconsult_id = str(uuid4())
         scheduled_at = datetime.now(timezone.utc) + timedelta(hours=2)
         jitsi_room = f"mood-iot-urgence-{teleconsult_id[:8]}"
+        lien_jitsi = f"{settings.JITSI_SERVER_URL.rstrip('/')}/{jitsi_room}"
 
         teleconsult = TeleconsultSession(
             id=teleconsult_id,
@@ -355,7 +356,6 @@ class EscalationEngine:
         # Le flux manuel previent deja le patient ; on fait de meme ici pour
         # que le patient soit informe du RDV auto-planifie (notif + push FCM).
         try:
-            lien_jitsi = f"{settings.JITSI_SERVER_URL}/{jitsi_room}"
             patient_notif = Notification(
                 patient_id=str(patient.id),
                 risk_score_id=risk_score_id,
@@ -413,6 +413,26 @@ class EscalationEngine:
                 patient.id,
             )
 
+        # --- 8. Email d'URGENCE au psychiatre (format HTML + lien téléconsult) ---
+        # Le niveau 2 a déjà envoyé l'email « Alerte » ; ici on envoie l'email
+        # « URGENCE » (rouge) qui contient en plus le lien de la téléconsultation.
+        if psychiatrist:
+            html_urgence = self._build_alert_email_html(
+                patient,
+                psychiatrist,
+                score,
+                shap_explanations,
+                level=3,
+                teleconsult_link=lien_jitsi,
+                teleconsult_time=scheduled_at.strftime("%H:%M"),
+            )
+            email_urgence_ok = await get_email_channel().send_email(
+                to_email=psychiatrist.email or "",
+                subject=f"URGENCE Mood-IoT : {patient.first_name} {patient.last_name}",
+                html_body=html_urgence,
+            )
+            resultats["email_urgence_psychiatre"] = email_urgence_ok
+
         # --- Persistance du journal d'escalade ---
         # Note : EscalationLog ORM a : notification_id, from_level, to_level, reason
         # On cree le log apres la notification de niveau 3 pour avoir le notification_id
@@ -454,7 +474,7 @@ class EscalationEngine:
 
         all_channels = (
             level2_result.get("channels_used", [])
-            + ["teleconsultation", "sms_contact_urgence"]
+            + ["teleconsultation", "email_urgence", "sms_contact_urgence"]
         )
 
         return {
@@ -493,12 +513,46 @@ class EscalationEngine:
         score: float,
         shap_explanations: list[str],
         level: int,
+        teleconsult_link: str | None = None,
+        teleconsult_time: str | None = None,
     ) -> str:
-        """Construit le corps HTML de l'email d'alerte."""
+        """Construit le corps HTML de l'email d'alerte.
+
+        Si `teleconsult_link` est fourni (niveau 3), un bloc « téléconsultation
+        d'urgence » avec le lien de connexion est ajouté à l'email.
+        """
         couleur_niveau = {2: "#e67e22", 3: "#e74c3c"}.get(level, "#3498db")
         label_niveau = {2: "Alerte", 3: "URGENCE"}.get(level, "Information")
 
         explications_html = "".join(f"<li>{e}</li>" for e in shap_explanations[:3])
+
+        # Bloc téléconsultation d'urgence (niveau 3 uniquement).
+        teleconsult_html = ""
+        if teleconsult_link:
+            horaire = f" (prévue à {teleconsult_time} UTC)" if teleconsult_time else ""
+            teleconsult_html = f"""
+                <div style="background: #fdecea; border: 1px solid {couleur_niveau};
+                            border-radius: 8px; padding: 16px; margin: 16px 0;">
+                    <p style="margin: 0 0 8px; font-weight: bold; color: {couleur_niveau};">
+                        Téléconsultation d'urgence planifiée{horaire}
+                    </p>
+                    <p style="margin: 0 0 12px; font-size: 14px;">
+                        Une session de téléconsultation a été créée automatiquement
+                        pour ce patient. Rejoignez-la directement :
+                    </p>
+                    <p style="text-align: center; margin: 8px 0;">
+                        <a href="{teleconsult_link}"
+                           style="background: {couleur_niveau}; color: #ffffff;
+                                  text-decoration: none; padding: 12px 30px;
+                                  border-radius: 8px; font-weight: bold;
+                                  display: inline-block; font-size: 15px;">
+                            Rejoindre la téléconsultation
+                        </a>
+                    </p>
+                    <p style="margin: 8px 0 0; font-size: 12px; color: #666; word-break: break-all;">
+                        Lien : {teleconsult_link}
+                    </p>
+                </div>"""
 
         # Le nom du médecin n'est pas porté par User (il vit dans doctor_profiles).
         # On reste défensif pour ne pas planter si l'attribut est absent.
@@ -538,6 +592,7 @@ class EscalationEngine:
                 </table>
                 <p><strong>Facteurs identifies :</strong></p>
                 <ul>{explications_html}</ul>
+                {teleconsult_html}
                 <p>Veuillez consulter le dashboard Mood-IoT pour plus de details et prendre
                    les mesures appropriees.</p>
                 <p style="text-align: center; margin: 24px 0;">

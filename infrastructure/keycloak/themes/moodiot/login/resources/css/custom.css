@@ -1,13 +1,14 @@
 /* ============================================================
    Mood-IoT — thème de connexion Keycloak
    Rebrande le thème keycloak (v1) pour matcher le dashboard :
-   fond clair, carte arrondie, accent bleu #0288d1.
+   fond clair, carte arrondie, accent vert apaisant (#16a34a).
+   Vert volontairement sobre (pas criard) pour le confort visuel.
    ============================================================ */
 
 :root {
-  --moodiot-blue: #0288d1;
-  --moodiot-blue-dark: #0277bd;
-  --moodiot-bg: #f4f6fb;
+  --moodiot-green: #16a34a;       /* vert principal (emerald 600) */
+  --moodiot-green-dark: #15803d;  /* survol / focus (emerald 700) */
+  --moodiot-bg: #f3f7f4;          /* fond clair légèrement verdâtre */
   --moodiot-text: #1f2937;
 }
 
@@ -21,7 +22,7 @@ body.login-pf,
 
 /* ---- En-tête / nom du realm (MOOD-IOT) ---- */
 #kc-header-wrapper {
-  color: var(--moodiot-blue) !important;
+  color: var(--moodiot-green-dark) !important;
   font-weight: 800 !important;
   letter-spacing: 0.04em;
   text-transform: none;
@@ -32,9 +33,9 @@ body.login-pf,
 /* ---- Carte de connexion façon dashboard ---- */
 .login-pf-page .card-pf {
   border: none !important;
-  border-top: 4px solid var(--moodiot-blue) !important;
+  border-top: 4px solid var(--moodiot-green) !important;
   border-radius: 16px !important;
-  box-shadow: 0 8px 30px rgba(2, 136, 209, 0.12) !important;
+  box-shadow: 0 8px 30px rgba(22, 163, 74, 0.12) !important;
   padding: 28px !important;
   margin-top: 24px;
 }
@@ -48,8 +49,8 @@ body.login-pf,
 /* ---- Boutons primaires ---- */
 .btn-primary,
 input[type="submit"].btn-primary {
-  background: var(--moodiot-blue) !important;
-  border-color: var(--moodiot-blue) !important;
+  background: var(--moodiot-green) !important;
+  border-color: var(--moodiot-green) !important;
   border-radius: 10px !important;
   font-weight: 600 !important;
   padding: 10px 16px !important;
@@ -57,8 +58,8 @@ input[type="submit"].btn-primary {
 .btn-primary:hover,
 .btn-primary:focus,
 .btn-primary:active {
-  background: var(--moodiot-blue-dark) !important;
-  border-color: var(--moodiot-blue-dark) !important;
+  background: var(--moodiot-green-dark) !important;
+  border-color: var(--moodiot-green-dark) !important;
 }
 
 /* ---- Champs de saisie ---- */
@@ -69,8 +70,8 @@ input.form-control {
   padding: 10px 12px !important;
 }
 .form-control:focus {
-  border-color: var(--moodiot-blue) !important;
-  box-shadow: 0 0 0 3px rgba(2, 136, 209, 0.15) !important;
+  border-color: var(--moodiot-green) !important;
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15) !important;
 }
 
 /* ---- Liens (mot de passe oublié, inscription) ---- */
@@ -78,10 +79,10 @@ a,
 .login-pf a,
 #kc-registration a,
 #kc-info-message a {
-  color: var(--moodiot-blue) !important;
+  color: var(--moodiot-green-dark) !important;
 }
 a:hover {
-  color: var(--moodiot-blue-dark) !important;
+  color: var(--moodiot-green) !important;
 }
 
 /* ---- Zone "Nouvel utilisateur ? S'enregistrer" ---- */

@@ -141,10 +141,10 @@ const sections = [
           Pour exercer vos droits, contactez le Delegue a la Protection des
           Donnees :{" "}
           <a
-            href="mailto:dpo@mood-iot.fr"
+            href="mailto:info@mood-iot.fr"
             className="font-medium text-primary-600 hover:underline"
           >
-            dpo@mood-iot.fr
+            info@mood-iot.fr
           </a>
         </p>
       </>
@@ -257,10 +257,10 @@ const sections = [
           <p className="mt-1 text-gray-500">
             Email :{" "}
             <a
-              href="mailto:dpo@mood-iot.fr"
+              href="mailto:info@mood-iot.fr"
               className="font-medium text-primary-600 hover:underline"
             >
-              dpo@mood-iot.fr
+              info@mood-iot.fr
             </a>
           </p>
         </div>

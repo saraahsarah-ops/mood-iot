@@ -166,7 +166,7 @@ const ConsentScreen: React.FC<ConsentScreenProps> = ({ onConsentGiven }) => {
             • Droit de rectification (Art. 16){'\n'}
             • Droit a l'effacement (Art. 17){'\n'}
             • Droit de retirer votre consentement a tout moment{'\n'}
-            • Contact DPO : dpo@mood-iot.fr
+            • Contact DPO : info@mood-iot.fr
           </Text>
         </View>
 
