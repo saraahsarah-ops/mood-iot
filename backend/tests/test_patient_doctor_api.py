@@ -4,6 +4,25 @@ Le psychiatre semé est lié au patient (conftest) : accès autorisé, et
 anti-IDOR vérifié sur un patient non lié.
 """
 import uuid
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _mock_keycloak_admin():
+    """La création/suppression de patient appelle Keycloak (compte de connexion).
+    En test il n'y a pas de Keycloak : on mocke le provisionnement.
+    """
+    with patch(
+        "src.shared.keycloak_admin.create_patient_account",
+        new=AsyncMock(return_value="kc-test-id"),
+    ), patch(
+        "src.shared.keycloak_admin.delete_account",
+        new=AsyncMock(return_value=None),
+    ):
+        yield
+
 
 PATIENT_ID = "00000000-0000-0000-0000-0000000000a2"
 
